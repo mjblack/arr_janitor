@@ -1,0 +1,16 @@
+backends:
+  - name: My Sonarr
+    type: sonarr                 # sonarr | radarr
+    url: http://localhost:8080
+    api_key: "12355677757"
+    interval: 30m                # optional, <int>[m|h|d], default 20m
+    extensions_filter:           # bare ext (scr -> *.scr) OR glob ("*.lnk")
+      - scr
+      - exe
+      - bat
+      - "*.lnk"
+    download_clients:
+      - name: My qbittorrent     # matches the client name in Sonarr/Radarr
+        username: admin          # api_key XOR (username + password)
+        password: password
+        # api_key: "..."         # alternative to username/password

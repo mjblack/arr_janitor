@@ -1,0 +1,19 @@
+{
+  "backends": [
+    {
+      "name": "My Sonarr",
+      "type": "sonarr",
+      "url": "http://localhost:8080",
+      "api_key": "12355677757",
+      "interval": "30m",
+      "extensions_filter": ["scr", "exe", "bat", "*.lnk"],
+      "download_clients": [
+        {
+          "name": "My qbittorrent",
+          "username": "admin",
+          "password": "password"
+        }
+      ]
+    }
+  ]
+}

@@ -7,3 +7,5 @@ require "qbittorrent"
 module ArrJanitor
   VERSION = "0.1.0"
 end
+
+require "./arr_janitor/config"

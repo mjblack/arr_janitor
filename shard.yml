@@ -11,7 +11,7 @@ description: |
 
 targets:
   arr_janitor:
-    main: src/arr_janitor.cr
+    main: src/main.cr
 
 crystal: '>= 1.20.2'
 

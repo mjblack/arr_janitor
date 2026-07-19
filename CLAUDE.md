@@ -64,9 +64,9 @@ backends:
 - Run: `bin/arr_janitor <config.yml>` (optionally `CRYSTAL_WORKERS=<n>`)
 - Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec` (specs may run without `-Dpreview_mt`)
 
-## Workflow (local-only for now — no GitHub repo yet)
+## Workflow (Gitea)
 
-Coordinated by a lead + specialized subagents. **No GitHub issues/PRs**: work is tracked in `ROADMAP.md`; subagents work on **local branches** (own worktree in this repo), the coordinator reviews the diff (pr-reviewer) and **merges locally** into `master`. When this goes to a GitHub repo, add CI (needs a token for the private `qbittorrent.cr` dep) + the release workflow, and switch to PRs.
+Repo: **`gitscm.mjbh.net/mblack/arr_janitor`** (remote `origin` = `git@gitscm.mjbh.net:mblack/arr_janitor.git`, SSH). Work is tracked as **Gitea issues** via the `tea` CLI (`tea issues list/create/close --repo mblack/arr_janitor`). Coordinated by a lead + specialized subagents: a subagent implements a unit on a local branch (own worktree), the coordinator reviews the diff and **merges into `master`** (put `closes #N` in the merge commit so Gitea closes the issue on push), then `git push`. `ROADMAP.md` is the higher-level unit map (its numbering predates the Gitea issues).
 
 ## Gotchas
 - `shard.lock` **is** committed (this is an app).

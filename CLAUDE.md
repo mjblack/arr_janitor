@@ -64,9 +64,17 @@ backends:
 - Run: `bin/arr_janitor <config.yml>` (optionally `CRYSTAL_WORKERS=<n>`)
 - Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec` (specs may run without `-Dpreview_mt`)
 
-## Workflow (Gitea)
+## Workflow (Gitea, PR-based)
 
-Repo: **`gitscm.mjbh.net/mblack/arr_janitor`** (remote `origin` = `git@gitscm.mjbh.net:mblack/arr_janitor.git`, SSH). Work is tracked as **Gitea issues** via the `tea` CLI (`tea issues list/create/close --repo mblack/arr_janitor`). Coordinated by a lead + specialized subagents: a subagent implements a unit on a local branch (own worktree), the coordinator reviews the diff and **merges into `master`** (put `closes #N` in the merge commit so Gitea closes the issue on push), then `git push`. `ROADMAP.md` is the higher-level unit map (its numbering predates the Gitea issues).
+Repo: **`gitscm.mjbh.net/mblack/arr_janitor`** (remote `origin` = `git@gitscm.mjbh.net:mblack/arr_janitor.git`, SSH). Work is tracked as **Gitea issues** via the `tea` CLI (`tea issues|pr list/create/merge --repo mblack/arr_janitor`).
+
+Flow per unit (mirrors the GitHub flow, on Gitea):
+1. A subagent implements the unit on a **feature branch** in its own worktree and commits (no push).
+2. The coordinator **pushes the branch** (`git push -u origin <branch>`) and opens a **PR** (`tea pr create --head <branch> --base master --title … --description …`).
+3. **pr-reviewer** reviews the diff.
+4. Coordinator **squash-merges** (`tea pr merge <n> --style squash`) with `closes #<issue>` so Gitea closes the issue, then `git fetch` + fast-forward local `master`.
+
+`ROADMAP.md` is the higher-level unit map (its numbering predates the Gitea issues).
 
 ## Gotchas
 - `shard.lock` **is** committed (this is an app).

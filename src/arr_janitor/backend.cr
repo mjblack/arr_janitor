@@ -90,6 +90,10 @@ module ArrJanitor
     # Human-readable backend name (from config).
     abstract def name : String
 
+    # The `Config::Backend` this backend was built from. The janitor reads it for
+    # the `extensions_filter` matcher and download-client credentials.
+    abstract def config : Config::Backend
+
     # The current download queue.
     abstract def queue : Array(QueueItem)
 

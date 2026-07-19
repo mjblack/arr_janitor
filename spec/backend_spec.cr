@@ -14,6 +14,14 @@ private class StubBackend < ArrJanitor::Backend
     "stub"
   end
 
+  def config : ArrJanitor::Config::Backend
+    ArrJanitor::Config::Backend.new(
+      name: "stub",
+      type: ArrJanitor::Config::BackendType::Sonarr,
+      url: "http://localhost:8989",
+      api_key: "key")
+  end
+
   def queue : Array(ArrJanitor::QueueItem)
     [] of ArrJanitor::QueueItem
   end

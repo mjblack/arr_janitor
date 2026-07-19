@@ -10,6 +10,9 @@ module ArrJanitor
     # Page size used when walking the (paged) queue endpoint.
     QUEUE_PAGE_SIZE = 100
 
+    # The `Config::Backend` this backend was built from.
+    getter config : Config::Backend
+
     def initialize(@config : Config::Backend)
       @client = Sonarr::Client.new(@config.url, @config.api_key)
     end

@@ -23,7 +23,7 @@ Each unit lands on its own local branch, is reviewed, and merged into `master`.
   a consumer that drains on the main fiber via Crystal `Log` → stdout. Janitor per-item pipeline:
   list files → match `extensions_filter` → `delete_and_blocklist` → if released, `search`;
   emits via the `Reporter`. Depends on #2, #3.
-- [ ] **5. Scheduler + CLI** — **one fiber per backend**; each loops and runs a scan
+- [x] **5. Scheduler + CLI** — **one fiber per backend**; each loops and runs a scan
   **immediately when `due?`** (missed/first run), then `schedule_next`. Workers send
   `LogEvent`s down a `Channel` drained by the **main fiber**. Build/run with **`-Dpreview_mt`**.
   Graceful shutdown (SIGINT/SIGTERM); `arr_janitor.cr` parses the config path and runs. Depends on #4.

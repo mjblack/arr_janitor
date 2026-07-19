@@ -46,17 +46,23 @@ backends:
 ## Architecture (`src/arr_janitor/`, built incrementally)
 
 - `config.cr` — `Config`/`Backend`/`DownloadClient` (`YAML::Serializable` + `JSON::Serializable`), loading, interval parsing, extension matcher, validation.
-- `backend/` — `Backend` interface + `SonarrBackend` (via the `sonarr` shard): `queue`, release-status, `delete_and_blocklist`, `search`.
+- `backend/` — `Backend` interface + `SonarrBackend` (via the `sonarr` shard): `queue`, release-status, `delete_and_blocklist`, `search`. Also carries scheduling state: **`next_run : Time?`**, `due?(now = Time.local)` (true when `next_run.nil? || now >= next_run`), and `schedule_next(now = Time.local)` (`next_run = now + interval_span`).
 - `download_client/` — resolve + connect to qBittorrent (via the `qbittorrent` shard), `files_for(hash)`.
-- `janitor.cr` — per-item pipeline: files → bad-ext match → delete+blocklist → (if released) search.
-- `scheduler.cr` + `arr_janitor.cr` — one fiber per backend on its interval; graceful shutdown (SIGINT/SIGTERM); CLI takes the config path.
+- `logging` — `LogEvent` + a channel-backed `Reporter` (workers emit events) + a consumer that drains the channel on the **main fiber** and writes via Crystal's `Log`.
+- `janitor.cr` — per-item pipeline: files → bad-ext match → delete+blocklist → (if released) search; emits via the `Reporter`.
+- `scheduler.cr` + `arr_janitor.cr` — **one fiber per backend**; each loops, and when the backend is `due?` runs a scan and calls `schedule_next`; workers send log messages down a `Channel(LogEvent)` that the **main fiber consumes**. Graceful shutdown (SIGINT/SIGTERM); CLI takes the config path.
+
+### Runtime
+- A backend runs **immediately** whenever it's `due?` — i.e. on first tick (`next_run` nil) or once a scheduled run has been missed (`Time.local >= next_run`) — no extra delay before the catch-up run.
+- Built/run with **`-Dpreview_mt`** (multi-threaded scheduler) so backend fibers can run across threads. Logging is funneled through a single `Channel(LogEvent)` drained by the main fiber, so console output stays ordered/serialized across threads.
+- Logging uses Crystal's **`Log`** to **stdout** for now (file logging is a planned addition) — the consumer maps each `LogEvent` to `Log.for(source).<severity>`.
 
 ## Commands
 
 - Install deps: `shards install`
-- Build: `shards build` (binary in `bin/arr_janitor`) or `crystal build src/arr_janitor.cr`
-- Run: `bin/arr_janitor <config.yml>`
-- Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec`
+- Build (multi-threaded): `shards build -Dpreview_mt` (binary in `bin/arr_janitor`) or `crystal build -Dpreview_mt src/arr_janitor.cr`
+- Run: `bin/arr_janitor <config.yml>` (optionally `CRYSTAL_WORKERS=<n>`)
+- Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec` (specs may run without `-Dpreview_mt`)
 
 ## Workflow (local-only for now — no GitHub repo yet)
 

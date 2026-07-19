@@ -96,6 +96,32 @@ describe ArrJanitor::CLI do
     end
   end
 
+  describe ".dry_run?" do
+    it "is true when --dry-run is present" do
+      ArrJanitor::CLI.dry_run?(["config.yml", "--dry-run"]).should be_true
+    end
+
+    it "is true when -n is present" do
+      ArrJanitor::CLI.dry_run?(["-n", "config.yml"]).should be_true
+    end
+
+    it "is false when neither flag is present" do
+      ArrJanitor::CLI.dry_run?(["config.yml"]).should be_false
+    end
+
+    it "does not confuse the dry-run flags with the config path" do
+      ArrJanitor::CLI.config_path(["--dry-run", "config.yml"]).should eq("config.yml")
+      ArrJanitor::CLI.config_path(["-n", "config.yml"]).should eq("config.yml")
+    end
+
+    it "combines with the config's dry_run so either enables it" do
+      # flag OR config.dry_run
+      (false || ArrJanitor::CLI.dry_run?(["-n"])).should be_true
+      (true || ArrJanitor::CLI.dry_run?([] of String)).should be_true
+      (false || ArrJanitor::CLI.dry_run?([] of String)).should be_false
+    end
+  end
+
   describe ".load_config" do
     it "loads and validates a valid config" do
       with_config(VALID_YAML) do |path|

@@ -158,8 +158,14 @@ module ArrJanitor
     # `<int>[m|h|d]`. See `#retention_span`.
     property retention : String?
 
+    # When `true`, act as a dry run: log intended deletes/blocklists/searches
+    # without mutating Sonarr/qBittorrent or writing to the store. Can also be
+    # enabled at runtime via the `--dry-run`/`-n` CLI flag.
+    property? dry_run : Bool = false
+
     def initialize(@backends : Array(Backend) = [] of Backend,
-                   @database : String? = nil, @retention : String? = nil)
+                   @database : String? = nil, @retention : String? = nil,
+                   @dry_run : Bool = false)
     end
 
     # The SQLite database path, falling back to `DEFAULT_DATABASE`.

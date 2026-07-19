@@ -20,8 +20,12 @@ module ArrJanitor
 
     # Optional persistence for the processed-download audit log. When `nil`
     # (the default) recording is a no-op, so the pipeline runs unchanged.
+    #
+    # When `dry_run` is `true`, the read path is unchanged but no mutation is
+    # performed: intended deletes/blocklists/searches are logged with a
+    # `[DRY RUN]` prefix and nothing is written to the store.
     def initialize(@resolver : DownloadClientResolver = DEFAULT_RESOLVER,
-                   @store : Store? = nil)
+                   @store : Store? = nil, @dry_run : Bool = false)
     end
 
     # Scans `backend.queue`, acting on each item. Every item is processed inside
@@ -75,6 +79,18 @@ module ArrJanitor
       end
 
       reporter.warn(source, "bad extension(s) in '#{item.title}': #{bad.join(", ")}")
+
+      if @dry_run
+        act_dry_run(backend, item, reporter, source, bad)
+      else
+        act(backend, item, reporter, source, hash, bad)
+      end
+    end
+
+    # The mutating action path: delete + blocklist, record to the store, and
+    # re-trigger a search when the episode/movie has already been released.
+    private def act(backend : Backend, item : QueueItem, reporter : Reporter,
+                    source : String, hash : String, bad : Array(String)) : Nil
       backend.delete_and_blocklist(item)
       reporter.info(source, "removed + blocklisted '#{item.title}'")
       @store.try &.record_processed(backend.name, hash, item.title, "removed_blocklisted", bad)
@@ -84,6 +100,21 @@ module ArrJanitor
         reporter.info(source, "search re-triggered")
       else
         reporter.info(source, "not released yet; skipping search")
+      end
+    end
+
+    # The dry-run action path: log the intended delete/blocklist and search
+    # decision without mutating the backend or store. The release check is a
+    # read-only call, so it still runs to report what a real run would do.
+    private def act_dry_run(backend : Backend, item : QueueItem,
+                            reporter : Reporter, source : String,
+                            bad : Array(String)) : Nil
+      reporter.warn(source, "[DRY RUN] would delete + blocklist '#{item.title}' (bad: #{bad.join(", ")})")
+
+      if backend.released?(item)
+        reporter.info(source, "[DRY RUN] would re-trigger search for '#{item.title}'")
+      else
+        reporter.info(source, "[DRY RUN] not released; would skip search")
       end
     end
   end

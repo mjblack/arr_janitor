@@ -223,6 +223,63 @@ describe ArrJanitor::Janitor do
     end
   end
 
+  describe "dry-run mode" do
+    it "logs intended delete/blocklist + search but does not mutate the backend" do
+      item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+        title: "Bad.Release", episode_id: 5)
+      backend = StubBackend.new(build_config, [item], qbit_info)
+      backend.released = true
+
+      resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+        FakeDownloadClient.new(["show.mkv", "virus.exe"])
+      end
+      events = capture(backend, ArrJanitor::Janitor.new(resolver, dry_run: true))
+
+      backend.deleted.should be_empty
+      backend.searched.should be_empty
+      events.any? { |e| e.message.includes?("[DRY RUN] would delete + blocklist 'Bad.Release'") && e.message.includes?("virus.exe") }.should be_true
+      events.any?(&.message.includes?("[DRY RUN] would re-trigger search for 'Bad.Release'")).should be_true
+    end
+
+    it "logs that it would skip the search when not released" do
+      item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+        title: "Bad.Release", episode_id: 5)
+      backend = StubBackend.new(build_config, [item], qbit_info)
+      backend.released = false
+
+      resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+        FakeDownloadClient.new(["virus.scr"])
+      end
+      events = capture(backend, ArrJanitor::Janitor.new(resolver, dry_run: true))
+
+      backend.deleted.should be_empty
+      backend.searched.should be_empty
+      events.any?(&.message.includes?("[DRY RUN] not released; would skip search")).should be_true
+    end
+
+    it "does not write to the store" do
+      dir = File.tempname("arr_janitor_dry_run_store")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Bad.Release", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+
+        resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+          FakeDownloadClient.new(["show.mkv", "virus.exe"])
+        end
+        capture(backend, ArrJanitor::Janitor.new(resolver, store, dry_run: true))
+
+        backend.deleted.should be_empty
+        store.processed?(backend.name, "HASH").should be_false
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   describe "store recording" do
     it "records a processed download in the store after a bad-download delete" do
       dir = File.tempname("arr_janitor_janitor_store")

@@ -55,6 +55,17 @@ describe ArrJanitor::Config do
       config.validation_errors.should be_empty
     end
 
+    it "defaults dry_run to false when omitted" do
+      config = ArrJanitor::Config.from_yaml(VALID_YAML)
+      config.dry_run?.should be_false
+    end
+
+    it "parses dry_run: true" do
+      body = VALID_YAML + "\ndry_run: true\n"
+      config = ArrJanitor::Config.from_yaml(body)
+      config.dry_run?.should be_true
+    end
+
     it "raises Config::Error on malformed YAML" do
       expect_raises(ArrJanitor::Config::Error, /invalid YAML/) do
         ArrJanitor::Config.from_yaml("backends: [ : : :")

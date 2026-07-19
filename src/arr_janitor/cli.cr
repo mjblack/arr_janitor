@@ -19,7 +19,7 @@ module ArrJanitor
     def self.run(argv : Array(String)) : Nil
       path = config_path(argv)
       if path.nil?
-        STDERR.puts "usage: arr_janitor <config.yml> | --config <path>"
+        STDERR.puts "usage: arr_janitor <config.yml> | --config <path> [--dry-run|-n]"
         exit 1
       end
 
@@ -42,7 +42,12 @@ module ArrJanitor
       store = build_store(config)
       LOG.info { "persistence database: #{config.database_path}" }
 
-      janitor = Janitor.new(store: store)
+      effective_dry_run = config.dry_run? || dry_run?(argv)
+      if effective_dry_run
+        LOG.warn { "DRY RUN enabled — no downloads will be deleted, blocklisted, or searched" }
+      end
+
+      janitor = Janitor.new(store: store, dry_run: effective_dry_run)
       Scheduler.new(backends, janitor,
         store: store, retention: config.retention_span).run
     end
@@ -66,6 +71,12 @@ module ArrJanitor
         end
       end
       nil
+    end
+
+    # Whether *argv* requests a dry run via `--dry-run`/`-n`. Combined with the
+    # config's own `dry_run` (either enables it) in `run`.
+    def self.dry_run?(argv : Array(String)) : Bool
+      argv.any? { |arg| arg == "--dry-run" || arg == "-n" }
     end
 
     # Loads and validates the config at *path*. Raises `Config::Error` on a

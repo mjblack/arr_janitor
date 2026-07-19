@@ -1,3 +1,6 @@
+# database: arr_janitor.db       # optional, SQLite persistence path (default arr_janitor.db)
+# retention: 30d                 # optional, audit-log retention <int>[m|h|d] (default 30d)
+
 backends:
   - name: My Sonarr
     type: sonarr                 # sonarr | radarr

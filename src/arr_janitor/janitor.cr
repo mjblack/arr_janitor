@@ -18,7 +18,10 @@ module ArrJanitor
       DownloadClient.build(implementation, base_url, api_key, username, password)
     end
 
-    def initialize(@resolver : DownloadClientResolver = DEFAULT_RESOLVER)
+    # Optional persistence for the processed-download audit log. When `nil`
+    # (the default) recording is a no-op, so the pipeline runs unchanged.
+    def initialize(@resolver : DownloadClientResolver = DEFAULT_RESOLVER,
+                   @store : Store? = nil)
     end
 
     # Scans `backend.queue`, acting on each item. Every item is processed inside
@@ -74,6 +77,7 @@ module ArrJanitor
       reporter.warn(source, "bad extension(s) in '#{item.title}': #{bad.join(", ")}")
       backend.delete_and_blocklist(item)
       reporter.info(source, "removed + blocklisted '#{item.title}'")
+      @store.try &.record_processed(backend.name, hash, item.title, "removed_blocklisted", bad)
 
       if backend.released?(item)
         backend.search(item)

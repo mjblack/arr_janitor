@@ -143,9 +143,48 @@ module ArrJanitor
       end
     end
 
+    # Default SQLite database path when none is configured.
+    DEFAULT_DATABASE = "arr_janitor.db"
+
+    # Default retention window for `processed_downloads` audit rows.
+    DEFAULT_RETENTION = 30.days
+
     property backends : Array(Backend) = [] of Backend
 
-    def initialize(@backends : Array(Backend) = [] of Backend)
+    # Optional path to the SQLite persistence database. See `#database_path`.
+    property database : String?
+
+    # Optional retention window for processed-download audit rows, as
+    # `<int>[m|h|d]`. See `#retention_span`.
+    property retention : String?
+
+    def initialize(@backends : Array(Backend) = [] of Backend,
+                   @database : String? = nil, @retention : String? = nil)
+    end
+
+    # The SQLite database path, falling back to `DEFAULT_DATABASE`.
+    def database_path : String
+      path = database
+      (path.nil? || path.blank?) ? DEFAULT_DATABASE : path
+    end
+
+    # The retention window as a `Time::Span`. Defaults to `DEFAULT_RETENTION`
+    # when unset/blank; raises `Config::Error` on a malformed value.
+    def retention_span : Time::Span
+      raw = retention
+      return DEFAULT_RETENTION if raw.nil? || raw.blank?
+
+      if md = Backend::INTERVAL_PATTERN.match(raw)
+        amount = md[1].to_i
+        case md[2]
+        when "m" then amount.minutes
+        when "h" then amount.hours
+        when "d" then amount.days
+        else          raise Error.new("invalid retention unit: #{raw.inspect}")
+        end
+      else
+        raise Error.new("invalid retention: #{raw.inspect} (expected <int>[m|h|d])")
+      end
     end
 
     # Loads a config from `path`. YAML wins: `.yml`/`.yaml` parse as YAML,

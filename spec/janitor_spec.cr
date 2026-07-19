@@ -222,6 +222,51 @@ describe ArrJanitor::Janitor do
       events.any? { |e| e.severity.error? && e.message.includes?("Explodes") }.should be_true
     end
   end
+
+  describe "store recording" do
+    it "records a processed download in the store after a bad-download delete" do
+      dir = File.tempname("arr_janitor_janitor_store")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Bad.Release", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+
+        resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+          FakeDownloadClient.new(["show.mkv", "virus.exe"])
+        end
+        capture(backend, ArrJanitor::Janitor.new(resolver, store))
+
+        backend.deleted.should eq([item])
+        store.processed?(backend.name, "HASH").should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "takes no store action on a clean download" do
+      dir = File.tempname("arr_janitor_janitor_store")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Good.Release", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+
+        resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+          FakeDownloadClient.new(["show.mkv"])
+        end
+        capture(backend, ArrJanitor::Janitor.new(resolver, store))
+
+        store.processed?(backend.name, "HASH").should be_false
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
 end
 
 # Raises on the "BAD" hash and returns a bad file for anything else, exercising

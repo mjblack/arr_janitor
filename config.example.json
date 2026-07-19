@@ -1,4 +1,6 @@
 {
+  "database": "arr_janitor.db",
+  "retention": "30d",
   "backends": [
     {
       "name": "My Sonarr",

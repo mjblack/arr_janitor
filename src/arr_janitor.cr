@@ -8,4 +8,6 @@ module ArrJanitor
   VERSION = "0.1.0"
 end
 
-require "./arr_janitor/config"
+# Components are picked up automatically — drop new files into src/arr_janitor/
+# (config, backend/, download_client/, janitor, scheduler …). No entrypoint edit.
+require "./arr_janitor/**"

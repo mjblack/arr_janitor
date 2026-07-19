@@ -1,0 +1,25 @@
+# Keep the build context small and secrets/local cruft out of the image.
+# NOTE: shard.yml, shard.lock and src/ are intentionally NOT ignored — they are
+# required to build.
+
+.git
+.gitea
+.claude
+
+# Deps and build artifacts are rebuilt inside the image.
+lib
+bin
+
+# Not needed to build/run the binary.
+spec
+docs
+*.md
+
+# Local SQLite databases (and WAL/SHM sidecars) must never enter the image.
+*.db
+*.db-wal
+*.db-shm
+
+# Scratch / temp.
+tmp
+scratchpad

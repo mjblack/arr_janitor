@@ -76,6 +76,32 @@ Flow per unit (mirrors the GitHub flow, on Gitea):
 
 `ROADMAP.md` is the higher-level unit map (its numbering predates the Gitea issues).
 
+## Releases
+
+The version lives in **two** places that must always agree: `version:` in
+`shard.yml` and `ArrJanitor::VERSION` in `src/arr_janitor.cr`. Keep them in sync.
+
+Release is driven by **`.gitea/workflows/release.yml`**, a **manually triggered**
+(`workflow_dispatch`) workflow that mirrors the sonarr model: it is **CI-gated**
+(a `test` job replicates `ci.yml`), then a `release` job asserts the two version
+locations match, **builds and pushes** the container image to the Gitea registry
+(`gitscm.mjbh.net/mblack/arr_janitor:<version>` and `:latest`), and **creates the
+`v<version>` tag + a Gitea release** with generated notes. Never tag/release by
+hand — bump both version locations (+ CHANGELOG) via a PR, merge to `master`,
+then trigger the workflow. Like `ci.yml`, it is **inert** until a Gitea Actions
+runner, the `GH_TOKEN` secret, and registry push credentials exist.
+
+### Docker
+- **`Dockerfile`** — multi-stage (`crystallang/crystal:1.20.2` builder →
+  `debian:12-slim` runtime), builds the binary `-Dpreview_mt --release`, runs as
+  a non-root user, `VOLUME [/config, /data]`, default CMD runs in **daemon mode**
+  (`--daemon`). Private deps are fetched using a **BuildKit secret** (`id=ghtoken`)
+  so the `GH_TOKEN` never lands in a layer.
+- **`.dockerignore`** keeps the build context lean (but keeps `shard.yml`,
+  `shard.lock`, `src/`).
+- **`docker-compose.yml`** — user-facing example running the published image;
+  note the config's `database:` should point at `/data/arr_janitor.db`.
+
 ## Gotchas
 - `shard.lock` **is** committed (this is an app).
 - Deps are private repos on GitHub — `shards install` needs the `gh` credential helper (HTTPS) configured.

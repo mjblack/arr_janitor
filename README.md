@@ -157,6 +157,70 @@ fibers can run across threads. Tune the number of worker threads with the
 CRYSTAL_WORKERS=4 bin/arr_janitor config.yml -d
 ```
 
+## Docker
+
+A multi-stage [`Dockerfile`](Dockerfile) builds a slim `debian:12-slim` runtime
+image with a release binary (compiled `-Dpreview_mt`) that runs as a non-root
+user. The container runs in **daemon mode by default**.
+
+### Build locally
+
+The private `sonarr`/`qbittorrent.cr` dependencies are fetched from GitHub during
+the build, so it needs a GitHub token with read access to those repos. The token
+is passed as a **BuildKit secret** (never baked into a layer):
+
+```sh
+export GH_TOKEN=ghp_your_read_token
+DOCKER_BUILDKIT=1 docker build \
+  --secret id=ghtoken,env=GH_TOKEN \
+  -t arr_janitor .
+```
+
+### Run
+
+Mount your config read-only and a writable data volume:
+
+```sh
+docker run --rm \
+  -v ./config.yml:/config/config.yml:ro \
+  -v ./data:/data \
+  -e CRYSTAL_WORKERS=4 \
+  arr_janitor
+```
+
+The default `CMD` runs `arr_janitor --config /config/config.yml --daemon`
+(continuous). For a **one-shot** run (single scan pass, then exit), override the
+command and drop `--daemon`:
+
+```sh
+docker run --rm \
+  -v ./config.yml:/config/config.yml:ro \
+  -v ./data:/data \
+  arr_janitor --config /config/config.yml
+```
+
+> **Set `database: /data/arr_janitor.db` in your config** so the SQLite database
+> lands on the mounted `/data` volume and survives container restarts. The
+> default (`arr_janitor.db`) would live in the container's ephemeral working
+> directory and be lost.
+
+### docker-compose
+
+A ready-to-use [`docker-compose.yml`](docker-compose.yml) runs the published
+image:
+
+```yaml
+services:
+  arr-janitor:
+    image: gitscm.mjbh.net/mblack/arr_janitor:latest
+    restart: unless-stopped
+    volumes:
+      - ./config.yml:/config/config.yml:ro
+      - ./data:/data
+    environment:
+      - CRYSTAL_WORKERS=4
+```
+
 ## Persistence
 
 State is kept in a SQLite database at `database` (default `arr_janitor.db`),

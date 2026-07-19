@@ -1,0 +1,170 @@
+# Gitea Actions release workflow for ArrJanitor.
+#
+# INERT UNTIL CONFIGURED. This workflow does nothing until ALL of the following
+# exist:
+#   1. A registered Gitea Actions runner able to pick up `ubuntu-latest` jobs.
+#   2. A repository/organisation secret named `GH_TOKEN` holding a GitHub
+#      Personal Access Token with *read* access to the private dependency repos
+#      `mjblack/sonarr` and `mjblack/qbittorrent.cr` (used by `shards install`
+#      in the test job and passed as a BuildKit secret to the image build).
+#   3. Credentials able to push to the Gitea container registry
+#      `gitscm.mjbh.net`: the built-in `GITHUB_TOKEN` (a.k.a. the Gitea Actions
+#      token) needs `package:write`. If it lacks that scope, define a dedicated
+#      `REGISTRY_TOKEN` secret and substitute it in the login step below.
+#
+# Release model mirrors the sonarr repo: this workflow is triggered MANUALLY
+# (workflow_dispatch). It does NOT trigger on tag push — the workflow itself
+# creates the `v<version>` tag and the Gitea release after CI passes.
+#
+# Crystal is pinned to 1.20.2 on purpose: the dev dependency ameba 1.6.4 does not
+# build on newer Crystal releases.
+
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # --------------------------------------------------------------------------
+  # CI gate: replicates ci.yml. The release job only runs if this passes.
+  # --------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # crystal-sqlite3 links against libsqlite3 and needs its dev headers.
+      - name: Install libsqlite3
+        run: |
+          apt-get update
+          apt-get install -y libsqlite3-dev
+
+      # Pin Crystal to 1.20.2 (ameba 1.6.4 does not build on newer Crystal).
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.20.2"
+
+      # Route GitHub HTTPS clones through the GH_TOKEN secret so `shards install`
+      # can fetch the private sonarr / qbittorrent.cr dependencies.
+      - name: Configure private dependency access
+        run: |
+          git config --global \
+            url."https://${{ secrets.GH_TOKEN }}@github.com/".insteadOf \
+            "https://github.com/"
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Check formatting
+        run: crystal tool format --check
+
+      - name: Lint
+        run: bin/ameba
+
+      - name: Build
+        run: crystal build -Dpreview_mt src/main.cr -o bin/arr_janitor
+
+      - name: Run specs
+        run: crystal spec
+
+  # --------------------------------------------------------------------------
+  # Release: version check → build+push image → tag + Gitea release.
+  # Runs only after the CI gate (`test`) succeeds.
+  # --------------------------------------------------------------------------
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The version lives in two places that must always agree: `version:` in
+      # shard.yml and `ArrJanitor::VERSION` in src/arr_janitor.cr. Fail loudly on
+      # any mismatch; otherwise export it as VERSION for later steps.
+      - name: Verify version consistency
+        run: |
+          set -euo pipefail
+          shard_version="$(sed -n 's/^version:[[:space:]]*//p' shard.yml | head -n1 | tr -d '"'"'"' ')"
+          src_version="$(sed -n 's/.*VERSION[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' src/arr_janitor.cr | head -n1)"
+          echo "shard.yml version:        '${shard_version}'"
+          echo "ArrJanitor::VERSION:      '${src_version}'"
+          if [ -z "${shard_version}" ] || [ -z "${src_version}" ]; then
+            echo "::error::could not read version from shard.yml and/or src/arr_janitor.cr"
+            exit 1
+          fi
+          if [ "${shard_version}" != "${src_version}" ]; then
+            echo "::error::version mismatch: shard.yml=${shard_version} vs ArrJanitor::VERSION=${src_version}"
+            exit 1
+          fi
+          echo "VERSION=${shard_version}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to the Gitea container registry. The built-in GITHUB_TOKEN needs
+      # package:write; substitute `secrets.REGISTRY_TOKEN` here if it does not.
+      # Fallback if docker/login-action is unavailable on the runner:
+      #   echo "${{ secrets.GITHUB_TOKEN }}" | docker login gitscm.mjbh.net \
+      #     -u "${{ github.actor }}" --password-stdin
+      - name: Log in to Gitea container registry
+        uses: docker/login-action@v3
+        with:
+          registry: gitscm.mjbh.net
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build the image and push :<version> and :latest. GH_TOKEN is passed as a
+      # BuildKit secret (secret-id `ghtoken`, matching the Dockerfile mount) so
+      # `shards install --production` can fetch the private deps. -Dpreview_mt is
+      # baked into the Dockerfile's build command.
+      #
+      # Fallback if docker/build-push-action is unavailable on the runner:
+      #   DOCKER_BUILDKIT=1 docker build \
+      #     --secret id=ghtoken,env=GH_TOKEN \
+      #     -t gitscm.mjbh.net/mblack/arr_janitor:${VERSION} \
+      #     -t gitscm.mjbh.net/mblack/arr_janitor:latest .
+      #   docker push gitscm.mjbh.net/mblack/arr_janitor:${VERSION}
+      #   docker push gitscm.mjbh.net/mblack/arr_janitor:latest
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            gitscm.mjbh.net/mblack/arr_janitor:${{ env.VERSION }}
+            gitscm.mjbh.net/mblack/arr_janitor:latest
+          secrets: |
+            ghtoken=${{ secrets.GH_TOKEN }}
+
+      # Create the tag and a Gitea release with generated notes via the Gitea
+      # REST API (self-contained; does not assume `tea` is on the runner). Uses
+      # the built-in GITHUB_TOKEN, which on Gitea Actions authenticates to the
+      # instance API — it needs repo write (contents) to create tags/releases.
+      # The Gitea server URL and repo come from the Actions context.
+      - name: Create tag and Gitea release
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          api="${GITHUB_SERVER_URL:-https://gitscm.mjbh.net}/api/v1/repos/${GITHUB_REPOSITORY}/releases"
+          echo "Creating release v${VERSION} at ${api}"
+          # target_commitish + a non-existent tag_name makes Gitea create the tag
+          # from the checked-out commit; generate_release_notes fills the body.
+          http_code="$(curl -sS -o /tmp/release_response.json -w '%{http_code}' \
+            -X POST "${api}" \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"tag_name\": \"v${VERSION}\",
+              \"target_commitish\": \"${GITHUB_SHA}\",
+              \"name\": \"v${VERSION}\",
+              \"generate_release_notes\": true
+            }")"
+          echo "HTTP ${http_code}"
+          cat /tmp/release_response.json || true
+          case "${http_code}" in
+            2*) echo "Release v${VERSION} created." ;;
+            *) echo "::error::Gitea release creation failed (HTTP ${http_code})"; exit 1 ;;
+          esac

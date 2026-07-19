@@ -35,6 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Persistence** — a SQLite-backed `Store` (WAL mode + busy timeout) with
   `processed_downloads` (audit log, retention-swept) and `download_states`
   tables, plus `database`/`retention` config options.
+- **Run modes** — `-d`/`--daemon` runs the scheduler continuously (one fiber per
+  backend, retention sweep, graceful SIGINT/SIGTERM shutdown); without it the app
+  makes a single scan pass over every backend and exits.
+- **Dry run** — `--dry-run`/`-n` (or `dry_run: true` in config) logs intended
+  deletes/blocklists/searches without mutating Sonarr/qBittorrent **and without
+  writing to the store**.
+- **Docker + release** — a multi-stage `Dockerfile` (`crystallang/crystal:1.20.2`
+  builder → `debian:12-slim` runtime, non-root, `-Dpreview_mt --release`, private
+  deps via a BuildKit secret, daemon by default), a `.dockerignore`, a
+  `docker-compose.yml` example, and a manually triggered, CI-gated
+  `.gitea/workflows/release.yml` that checks version consistency, builds/pushes
+  the image to the Gitea registry, and creates the `v<version>` tag + release.
 
 ### Notes
 

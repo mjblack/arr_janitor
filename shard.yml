@@ -1,0 +1,28 @@
+name: arr_janitor
+version: 0.1.0
+
+authors:
+  - Matthew J. Black <mjblack@gmail.com>
+
+description: |
+  ArrJanitor — continuously watches Sonarr/Radarr download queues, removes and
+  blocklists downloads that contain bad file extensions, and re-triggers a
+  search when the episode/movie is released.
+
+targets:
+  arr_janitor:
+    main: src/arr_janitor.cr
+
+crystal: '>= 1.20.2'
+
+license: MIT
+
+dependencies:
+  sonarr:
+    github: mjblack/sonarr
+  qbittorrent:
+    github: mjblack/qbittorrent.cr
+
+development_dependencies:
+  ameba:
+    github: crystal-ameba/ameba

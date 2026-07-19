@@ -1,0 +1,30 @@
+version: 2.0
+shards:
+  ameba:
+    git: https://github.com/crystal-ameba/ameba.git
+    version: 1.6.4
+
+  cookie_jar:
+    git: https://github.com/mamantoha/http-cookie_jar.git
+    version: 0.1.0
+
+  crest:
+    git: https://github.com/mamantoha/crest.git
+    version: 1.8.1
+
+  http-client-digest_auth:
+    git: https://github.com/mamantoha/http-client-digest_auth.git
+    version: 0.6.0
+
+  http_proxy:
+    git: https://github.com/mamantoha/http_proxy.git
+    version: 0.15.1
+
+  qbittorrent:
+    git: https://github.com/mjblack/qbittorrent.cr.git
+    version: 0.2.0
+
+  sonarr:
+    git: https://github.com/mjblack/sonarr.git
+    version: 0.2.0
+

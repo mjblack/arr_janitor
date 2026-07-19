@@ -1,0 +1,11 @@
+/docs/
+/lib/
+/bin/
+/.shards/
+*.dwarf
+
+# Claude Code agent worktrees
+/.claude/worktrees/
+
+# built binary (crystal build at repo root)
+/arr_janitor

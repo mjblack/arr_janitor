@@ -39,7 +39,19 @@ module ArrJanitor
         return
       end
 
-      Scheduler.new(backends).run
+      store = build_store(config)
+      LOG.info { "persistence database: #{config.database_path}" }
+
+      janitor = Janitor.new(store: store)
+      Scheduler.new(backends, janitor,
+        store: store, retention: config.retention_span).run
+    end
+
+    # Opens (creating if necessary) the SQLite `Store` at the configured
+    # `database_path`. Factored out so the store wiring is unit-testable without
+    # starting the scheduler.
+    def self.build_store(config : Config) : Store
+      Store.open(config.database_path)
     end
 
     # Extracts the config path from *argv*: a bare first argument, or the value

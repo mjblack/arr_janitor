@@ -15,6 +15,10 @@ module ArrJanitor
     # ceiling — a worker wakes early when the stop signal arrives).
     TICK = 1.second
 
+    # How often the retention-sweep fiber deletes aged `processed_downloads`
+    # rows. Long by design — the audit log is swept on a TTL, not per tick.
+    SWEEP_INTERVAL = 1.hour
+
     # The channel-backed facade workers log through; exposed for tests.
     getter reporter : Reporter
 
@@ -23,7 +27,9 @@ module ArrJanitor
 
     def initialize(@backends : Array(Backend), @janitor : Janitor = Janitor.new,
                    @channel : Channel(LogEvent) = Channel(LogEvent).new(1024),
-                   @tick : Time::Span = TICK)
+                   @tick : Time::Span = TICK, @store : Store? = nil,
+                   @retention : Time::Span? = nil,
+                   @sweep_interval : Time::Span = SWEEP_INTERVAL)
       @reporter = Reporter.new(@channel)
       @stop = Channel(Nil).new
     end
@@ -42,7 +48,12 @@ module ArrJanitor
     def run : Nil
       setup_signal_handlers
 
-      done = Channel(Nil).new(@backends.size)
+      # One fiber per backend, plus an optional retention-sweep fiber. Every
+      # fiber signals `done` when it stops so shutdown can wait for all of them.
+      worker_count = @backends.size
+      worker_count += 1 if sweeping?
+
+      done = Channel(Nil).new(worker_count)
       @backends.each do |backend|
         spawn do
           run_worker(backend)
@@ -51,11 +62,21 @@ module ArrJanitor
         end
       end
 
-      # Once stop is signalled, wait for every worker to finish (so no worker
-      # sends to a closed channel), then close the log channel to end the drain.
+      if sweeping?
+        spawn do
+          run_sweeper
+        ensure
+          done.send(nil)
+        end
+      end
+
+      # Once stop is signalled, wait for every worker (incl. the sweep fiber) to
+      # finish so none sends to a closed channel, close the store, then close the
+      # log channel to end the drain.
       spawn do
         @stop.receive?
-        @backends.size.times { done.receive }
+        worker_count.times { done.receive }
+        @store.try &.close
         @channel.close
       end
 
@@ -82,17 +103,60 @@ module ArrJanitor
     private def run_worker(backend : Backend) : Nil
       until @stop.closed?
         run_if_due(backend)
-        break if wait_tick
+        break if wait_for_stop(@tick)
       end
     end
 
-    # Waits up to a tick for the stop signal. Returns `true` when a stop was
-    # observed (the worker should exit), `false` when the tick elapsed.
-    private def wait_tick : Bool
+    # Whether a retention-sweep fiber should run: only when both a store and a
+    # retention window are configured.
+    private def sweeping? : Bool
+      !@store.nil? && !@retention.nil?
+    end
+
+    # Deletes `processed_downloads` rows older than the configured retention
+    # window and logs how many were removed. A no-op when no store/retention is
+    # configured. The fiber-free core of the sweep loop — call it directly in
+    # tests to exercise the sweep without spawning a fiber.
+    def sweep_once : Nil
+      store = @store
+      retention = @retention
+      return if store.nil? || retention.nil?
+
+      deleted = store.sweep(retention)
+      @reporter.info("arr_janitor.sweep",
+        "retention sweep removed #{deleted} processed download row(s) older than #{retention}")
+    end
+
+    # The retention-sweep loop: sweep once shortly after start, then on the
+    # `SWEEP_INTERVAL` cadence, waking early to exit promptly when a stop is
+    # signalled.
+    private def run_sweeper : Nil
+      # A brief initial delay lets startup logging settle; exit without sweeping
+      # if a stop arrives first.
+      return if wait_for_stop(@tick)
+      sweep_safely
+
+      until @stop.closed?
+        break if wait_for_stop(@sweep_interval)
+        sweep_safely
+      end
+    end
+
+    # Runs one sweep, logging (and swallowing) any error so a transient DB
+    # failure never kills the sweeper fiber — it just retries next cadence.
+    private def sweep_safely : Nil
+      sweep_once
+    rescue ex
+      @reporter.error("arr_janitor.sweep", "retention sweep failed", ex)
+    end
+
+    # Waits up to *span* for the stop signal. Returns `true` when a stop was
+    # observed (the caller should exit), `false` when *span* elapsed.
+    private def wait_for_stop(span : Time::Span) : Bool
       select
       when @stop.receive?
         true
-      when timeout(@tick)
+      when timeout(span)
         false
       end
     end

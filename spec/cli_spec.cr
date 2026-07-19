@@ -26,6 +26,57 @@ private def with_config(body : String, ext = ".yml", &)
   end
 end
 
+# A fake download client returning canned file paths — no network.
+private class FakeDownloadClient < ArrJanitor::DownloadClient
+  def initialize(@files : Array(String))
+  end
+
+  def files_for(hash : String) : Array(String)
+    @files
+  end
+end
+
+# A minimal `Backend` with a single canned queue item and download-client info,
+# recording the items it was asked to delete — enough to drive the janitor's
+# bad-download path. No network.
+private class StubBackend < ArrJanitor::Backend
+  getter deleted = [] of ArrJanitor::QueueItem
+
+  def initialize(@config : ArrJanitor::Config::Backend,
+                 @queue : Array(ArrJanitor::QueueItem),
+                 @client_info : ArrJanitor::DownloadClientInfo?)
+  end
+
+  getter config : ArrJanitor::Config::Backend
+
+  def interval_span : Time::Span
+    20.minutes
+  end
+
+  def name : String
+    @config.name
+  end
+
+  def queue : Array(ArrJanitor::QueueItem)
+    @queue
+  end
+
+  def released?(item : ArrJanitor::QueueItem) : Bool
+    false
+  end
+
+  def delete_and_blocklist(item : ArrJanitor::QueueItem) : Nil
+    @deleted << item
+  end
+
+  def search(item : ArrJanitor::QueueItem) : Nil
+  end
+
+  def download_client_info(name : String) : ArrJanitor::DownloadClientInfo?
+    @client_info
+  end
+end
+
 describe ArrJanitor::CLI do
   describe ".config_path" do
     it "reads a bare positional argument" do
@@ -107,6 +158,69 @@ describe ArrJanitor::CLI do
       ])
 
       ArrJanitor::CLI.build_backends(config).should be_empty
+    end
+  end
+
+  describe ".build_store" do
+    it "opens a functional store at the configured database path" do
+      dir = File.tempname("arr_janitor_cli_store")
+      Dir.mkdir_p(dir)
+      db_path = File.join(dir, "cli.db")
+      config = ArrJanitor::Config.new(database: db_path)
+      begin
+        store = ArrJanitor::CLI.build_store(config)
+        begin
+          File.exists?(db_path).should be_true
+          store.record_processed("sonarr", "H", "T", "removed_blocklisted", ["exe"])
+          store.processed?("sonarr", "H").should be_true
+        ensure
+          store.close
+        end
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "wires the store into a janitor that records processed downloads" do
+      dir = File.tempname("arr_janitor_cli_store")
+      Dir.mkdir_p(dir)
+      db_path = File.join(dir, "cli.db")
+      config = ArrJanitor::Config.new(database: db_path)
+      begin
+        # Open the store exactly as CLI.run does (via CLI.build_store).
+        store = ArrJanitor::CLI.build_store(config)
+        begin
+          backend_config = ArrJanitor::Config::Backend.new(
+            name: "Test Sonarr", type: ArrJanitor::Config::BackendType::Sonarr,
+            url: "http://localhost:8989", api_key: "key",
+            extensions_filter: ["exe"],
+            download_clients: [ArrJanitor::Config::DownloadClient.new(
+              name: "qbit", username: "admin", password: "secret")])
+          item = ArrJanitor::QueueItem.new(
+            id: 1, download_id: "HASH", download_client: "qbit", title: "Bad.Release")
+          info = ArrJanitor::DownloadClientInfo.new(
+            name: "qbit", implementation: "qBittorrent",
+            host: "localhost", port: 8080, use_ssl: false)
+          backend = StubBackend.new(backend_config, [item], info)
+
+          # Swap the janitor's resolver for one returning a fake bad-file client.
+          resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+            FakeDownloadClient.new(["show.mkv", "virus.exe"])
+          end
+          janitor = ArrJanitor::Janitor.new(resolver, store)
+
+          channel = Channel(ArrJanitor::LogEvent).new(64)
+          reporter = ArrJanitor::Reporter.new(channel)
+          janitor.process(backend, reporter)
+
+          backend.deleted.should eq([item])
+          store.processed?("Test Sonarr", "HASH").should be_true
+        ensure
+          store.close
+        end
+      ensure
+        FileUtils.rm_rf(dir)
+      end
     end
   end
 end

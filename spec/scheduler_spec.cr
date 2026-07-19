@@ -62,6 +62,21 @@ end
 
 private NOW = Time.utc(2026, 7, 18, 12, 0, 0)
 
+# Runs the block with a fresh temp-file `Store` (a real file, not `:memory:`,
+# so it survives the connection pool), closing it and removing its directory
+# afterwards.
+private def with_store(&)
+  dir = File.tempname("arr_janitor_scheduler_store")
+  Dir.mkdir_p(dir)
+  store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+  begin
+    yield store
+  ensure
+    store.close
+    FileUtils.rm_rf(dir)
+  end
+end
+
 describe ArrJanitor::Scheduler do
   describe "#run_due" do
     it "processes only the due backends" do
@@ -104,6 +119,41 @@ describe ArrJanitor::Scheduler do
 
       scheduler.run_due(NOW + 20.minutes) # due again
       janitor.processed.size.should eq(2)
+    end
+  end
+
+  describe "#sweep_once" do
+    it "sweeps aged rows and logs the deleted count" do
+      with_store do |store|
+        # One aged row (backdated through the public API) and one fresh row.
+        old = Time.utc - 40.days
+        store.record_processed("sonarr", "OLD", "a", "removed_blocklisted", ["exe"], created_at: old)
+        store.record_processed("sonarr", "NEW", "b", "removed_blocklisted", ["exe"])
+
+        channel = Channel(ArrJanitor::LogEvent).new(16)
+        scheduler = ArrJanitor::Scheduler.new(
+          [] of ArrJanitor::Backend, RecordingJanitor.new, channel,
+          store: store, retention: 30.days)
+
+        scheduler.sweep_once
+
+        # The aged row is gone; the fresh one remains.
+        store.processed?("sonarr", "OLD").should be_false
+        store.processed?("sonarr", "NEW").should be_true
+
+        # The deleted count (1) was reported through the log channel.
+        event = channel.receive
+        event.severity.info?.should be_true
+        event.message.should contain("removed 1 processed download row")
+      end
+    end
+
+    it "is a no-op with no store configured" do
+      scheduler = ArrJanitor::Scheduler.new([] of ArrJanitor::Backend, RecordingJanitor.new)
+      # Nothing to sweep, nothing logged, no raise.
+      scheduler.sweep_once
+      scheduler.channel.close
+      scheduler.channel.receive?.should be_nil
     end
   end
 end

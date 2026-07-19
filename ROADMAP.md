@@ -10,13 +10,13 @@ Each unit lands on its own local branch, is reviewed, and merged into `master`.
   → `Time::Span` (default 20m), extension matcher (bare ext + glob), and `#validate`
   (required fields; `type` enum; download-client `api_key` XOR `username`+`password`).
   Sample `config.example.yml`. *(foundational)*
-- [ ] **2. Sonarr backend** — `Backend` interface + `SonarrBackend` (via the `sonarr` shard):
+- [x] **2. Sonarr backend** — `Backend` interface + `SonarrBackend` (via the `sonarr` shard):
   fetch queue (with `downloadId`/`downloadClient`/episode), episode **release status**
   (aired + monitored), `delete_and_blocklist` (queue delete w/ `removeFromClient`+`blocklist`),
   `search` (command), and download-client config lookup by name. Carries scheduling state:
   **`next_run : Time?`**, `due?(now = Time.local)` (`next_run.nil? || now >= next_run`),
   `schedule_next(now)` (`next_run = now + interval_span`). Depends on #1.
-- [ ] **3. Download-client** — resolve a queue item's client (host/port/type from the *arr's
+- [x] **3. Download-client** — resolve a queue item's client (host/port/type from the *arr's
   download-client config, matched by name; creds from config) and connect to qBittorrent
   (via the `qbittorrent` shard) to `files_for(hash)`. Depends on #1.
 - [ ] **4. Logging + Janitor core** — `LogEvent` + channel-backed `Reporter` (workers emit) +

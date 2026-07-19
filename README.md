@@ -17,8 +17,10 @@ Every action is recorded to a local SQLite database for auditing.
 
 ## How it works
 
-One worker fiber runs per configured backend. Each fiber loops and, whenever its
-backend is *due* (its poll interval has elapsed), runs a scan:
+By default ArrJanitor makes a single scan pass over every backend and exits; with
+`-d`/`--daemon` it runs continuously (see [Run modes](#run-modes)). Either way,
+one worker fiber runs per configured backend, and when a backend is *due* it runs
+a scan:
 
 ```
 queue → for each item:
@@ -130,16 +132,30 @@ bin/arr_janitor config.yml          # bare path...
 bin/arr_janitor --config config.yml # ...or --config / -c
 ```
 
+### Run modes
+
+By **default** ArrJanitor runs **once**: it makes a single scan pass over every
+configured backend and then exits `0` — no interval loop, no waiting. This suits
+cron jobs, systemd timers, or one-off invocations.
+
+Pass **`-d`** / **`--daemon`** to run **continuously** instead: one worker fiber
+per backend loops on each backend's poll interval, a retention-sweep fiber ages
+out old audit rows, and the process runs until it receives **SIGINT** or
+**SIGTERM**, then shuts down gracefully (workers stop, the log channel drains,
+the process exits).
+
+```sh
+bin/arr_janitor config.yml          # run once, then exit
+bin/arr_janitor config.yml -d       # run continuously (daemon)
+```
+
 The `-Dpreview_mt` flag enables Crystal's multi-threaded runtime so backend
 fibers can run across threads. Tune the number of worker threads with the
 `CRYSTAL_WORKERS` environment variable:
 
 ```sh
-CRYSTAL_WORKERS=4 bin/arr_janitor config.yml
+CRYSTAL_WORKERS=4 bin/arr_janitor config.yml -d
 ```
-
-The service runs until it receives **SIGINT** or **SIGTERM**, then shuts down
-gracefully (workers stop, the log channel drains, the process exits).
 
 ## Persistence
 

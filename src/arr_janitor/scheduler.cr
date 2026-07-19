@@ -83,6 +83,32 @@ module ArrJanitor
       LogConsumer.drain(@channel)
     end
 
+    # Runs a single scan pass over every backend, then returns — the one-shot
+    # counterpart to `#run`. Spawns one worker fiber per backend that runs the
+    # backend once (via `run_if_due`, which runs on a fresh process because
+    # `next_run` is `nil`) and signals completion; a helper fiber closes the
+    # store and log channel once all workers finish, which lets the drain loop
+    # end and this method return. No signal traps, no tick loop, and no
+    # retention sweep — those are daemon-only.
+    def run_once : Nil
+      done = Channel(Nil).new(@backends.size)
+      @backends.each do |backend|
+        spawn do
+          run_if_due(backend)
+        ensure
+          done.send(nil)
+        end
+      end
+
+      spawn do
+        @backends.size.times { done.receive }
+        @store.try &.close
+        @channel.close
+      end
+
+      LogConsumer.drain(@channel)
+    end
+
     # Signals the workers to stop. Idempotent — safe to call from a signal
     # handler that may fire more than once.
     def stop : Nil

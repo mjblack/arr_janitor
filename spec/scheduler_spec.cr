@@ -122,6 +122,53 @@ describe ArrJanitor::Scheduler do
     end
   end
 
+  describe "#run_once" do
+    it "processes each backend exactly once and returns" do
+      a = StubBackend.new("a", due: true)
+      b = StubBackend.new("b", due: true)
+      janitor = RecordingJanitor.new
+      scheduler = ArrJanitor::Scheduler.new([a, b] of ArrJanitor::Backend, janitor)
+
+      scheduler.run_once # must return (not loop); the spec blocks here if it does.
+
+      janitor.processed.map(&.name).sort!.should eq(["a", "b"])
+      janitor.processed.size.should eq(2)
+    end
+
+    it "returns immediately with no backends" do
+      scheduler = ArrJanitor::Scheduler.new([] of ArrJanitor::Backend, RecordingJanitor.new)
+      scheduler.run_once
+    end
+
+    it "does not run the retention sweep (daemon-only), and closes the store" do
+      dir = File.tempname("arr_janitor_run_once_store")
+      Dir.mkdir_p(dir)
+      db_path = File.join(dir, "test.db")
+      begin
+        store = ArrJanitor::Store.open(db_path)
+        old = Time.utc - 40.days
+        store.record_processed("sonarr", "OLD", "a", "removed_blocklisted", ["exe"], created_at: old)
+
+        scheduler = ArrJanitor::Scheduler.new(
+          [] of ArrJanitor::Backend, RecordingJanitor.new,
+          store: store, retention: 30.days)
+
+        # run_once closes the store when it finishes; reopen to inspect state.
+        scheduler.run_once
+
+        reopened = ArrJanitor::Store.open(db_path)
+        begin
+          # The aged row survives: run_once never runs the retention sweep.
+          reopened.processed?("sonarr", "OLD").should be_true
+        ensure
+          reopened.close
+        end
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   describe "#sweep_once" do
     it "sweeps aged rows and logs the deleted count" do
       with_store do |store|

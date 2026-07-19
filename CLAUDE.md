@@ -61,7 +61,7 @@ backends:
 
 - Install deps: `shards install`
 - Build (multi-threaded): `shards build -Dpreview_mt` (binary in `bin/arr_janitor`) or `crystal build -Dpreview_mt src/arr_janitor.cr`
-- Run: `bin/arr_janitor <config.yml>` (optionally `CRYSTAL_WORKERS=<n>`)
+- Run: `bin/arr_janitor <config.yml> [-d]` (default: one scan pass then exit; `-d`/`--daemon`: continuous scheduler; optionally `CRYSTAL_WORKERS=<n>`)
 - Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec` (specs may run without `-Dpreview_mt`)
 
 ## Workflow (Gitea, PR-based)

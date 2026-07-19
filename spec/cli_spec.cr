@@ -122,6 +122,25 @@ describe ArrJanitor::CLI do
     end
   end
 
+  describe ".daemon?" do
+    it "is true when --daemon is present" do
+      ArrJanitor::CLI.daemon?(["config.yml", "--daemon"]).should be_true
+    end
+
+    it "is true when -d is present" do
+      ArrJanitor::CLI.daemon?(["-d", "config.yml"]).should be_true
+    end
+
+    it "is false when neither flag is present" do
+      ArrJanitor::CLI.daemon?(["config.yml"]).should be_false
+    end
+
+    it "does not confuse the daemon flags with the config path" do
+      ArrJanitor::CLI.config_path(["--daemon", "config.yml"]).should eq("config.yml")
+      ArrJanitor::CLI.config_path(["-d", "config.yml"]).should eq("config.yml")
+    end
+  end
+
   describe ".load_config" do
     it "loads and validates a valid config" do
       with_config(VALID_YAML) do |path|

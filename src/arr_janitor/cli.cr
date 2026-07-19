@@ -19,7 +19,7 @@ module ArrJanitor
     def self.run(argv : Array(String)) : Nil
       path = config_path(argv)
       if path.nil?
-        STDERR.puts "usage: arr_janitor <config.yml> | --config <path> [--dry-run|-n]"
+        STDERR.puts "usage: arr_janitor <config.yml> | --config <path> [-d|--daemon] [--dry-run|-n]"
         exit 1
       end
 
@@ -51,9 +51,18 @@ module ArrJanitor
       LOG.info { "persistence database: #{config.database_path}" } unless store.nil?
 
       janitor = Janitor.new(store: store, dry_run: effective_dry_run)
-      Scheduler.new(backends, janitor,
+      scheduler = Scheduler.new(backends, janitor,
         store: store,
-        retention: store.nil? ? nil : config.retention_span).run
+        retention: store.nil? ? nil : config.retention_span)
+
+      # Default: a single scan pass over every backend, then exit. `-d`/`--daemon`
+      # runs the continuous scheduler (fiber-per-backend loop, retention sweep,
+      # graceful shutdown on SIGINT/SIGTERM).
+      if daemon?(argv)
+        scheduler.run
+      else
+        scheduler.run_once
+      end
     end
 
     # Selects the `Store` for this run: `nil` in dry-run (strictly read-only, so
@@ -90,6 +99,12 @@ module ArrJanitor
     # config's own `dry_run` (either enables it) in `run`.
     def self.dry_run?(argv : Array(String)) : Bool
       argv.any? { |arg| arg == "--dry-run" || arg == "-n" }
+    end
+
+    # Whether *argv* requests daemon (continuous) mode via `--daemon`/`-d`.
+    # When absent the CLI runs a single scan pass and exits.
+    def self.daemon?(argv : Array(String)) : Bool
+      argv.any? { |arg| arg == "--daemon" || arg == "-d" }
     end
 
     # Loads and validates the config at *path*. Raises `Config::Error` on a

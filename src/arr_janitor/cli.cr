@@ -39,17 +39,30 @@ module ArrJanitor
         return
       end
 
-      store = build_store(config)
-      LOG.info { "persistence database: #{config.database_path}" }
-
       effective_dry_run = config.dry_run? || dry_run?(argv)
       if effective_dry_run
         LOG.warn { "DRY RUN enabled — no downloads will be deleted, blocklisted, or searched" }
       end
 
+      # In dry-run the store is never opened, so no database file is created and
+      # the retention-sweep fiber never starts (a nil store/retention is a no-op
+      # in `Scheduler`). Only log the persistence path when a store is opened.
+      store = build_store(config, effective_dry_run)
+      LOG.info { "persistence database: #{config.database_path}" } unless store.nil?
+
       janitor = Janitor.new(store: store, dry_run: effective_dry_run)
       Scheduler.new(backends, janitor,
-        store: store, retention: config.retention_span).run
+        store: store,
+        retention: store.nil? ? nil : config.retention_span).run
+    end
+
+    # Selects the `Store` for this run: `nil` in dry-run (strictly read-only, so
+    # no database file is created), otherwise the opened store. The store-wiring
+    # decision is factored out here so it can be unit-tested without starting the
+    # scheduler.
+    def self.build_store(config : Config, dry_run : Bool) : Store?
+      return nil if dry_run
+      build_store(config)
     end
 
     # Opens (creating if necessary) the SQLite `Store` at the configured

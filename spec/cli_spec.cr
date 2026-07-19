@@ -187,6 +187,37 @@ describe ArrJanitor::CLI do
     end
   end
 
+  describe ".build_store (dry-run selection)" do
+    it "returns nil and creates no database file in dry-run" do
+      dir = File.tempname("arr_janitor_cli_dryrun")
+      Dir.mkdir_p(dir)
+      db_path = File.join(dir, "dryrun.db")
+      config = ArrJanitor::Config.new(database: db_path)
+      begin
+        ArrJanitor::CLI.build_store(config, dry_run: true).should be_nil
+        # Strict dry-run must not touch the filesystem.
+        File.exists?(db_path).should be_false
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "opens the store and creates the database file when not dry-run" do
+      dir = File.tempname("arr_janitor_cli_dryrun")
+      Dir.mkdir_p(dir)
+      db_path = File.join(dir, "live.db")
+      config = ArrJanitor::Config.new(database: db_path)
+      begin
+        store = ArrJanitor::CLI.build_store(config, dry_run: false)
+        store.should be_a(ArrJanitor::Store)
+        File.exists?(db_path).should be_true
+        store.try &.close
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
   describe ".build_store" do
     it "opens a functional store at the configured database path" do
       dir = File.tempname("arr_janitor_cli_store")

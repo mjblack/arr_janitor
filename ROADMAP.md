@@ -5,7 +5,7 @@ Each unit lands on its own local branch, is reviewed, and merged into `master`.
 
 ## Units
 
-- [ ] **1. Config** — `Config`/`Backend`/`DownloadClient` models (`YAML::Serializable` +
+- [x] **1. Config** — `Config`/`Backend`/`DownloadClient` models (`YAML::Serializable` +
   `JSON::Serializable`), load-from-YAML-or-JSON (YAML priority), `interval` `<int>[m|h|d]`
   → `Time::Span` (default 20m), extension matcher (bare ext + glob), and `#validate`
   (required fields; `type` enum; download-client `api_key` XOR `username`+`password`).

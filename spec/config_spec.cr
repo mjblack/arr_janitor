@@ -129,6 +129,37 @@ describe ArrJanitor::Config do
     end
   end
 
+  describe "#retention_span" do
+    it "parses minutes/hours/days" do
+      ArrJanitor::Config.new(retention: "90m").retention_span.should eq(90.minutes)
+      ArrJanitor::Config.new(retention: "12h").retention_span.should eq(12.hours)
+      ArrJanitor::Config.new(retention: "7d").retention_span.should eq(7.days)
+    end
+
+    it "defaults to 30 days when nil or blank" do
+      ArrJanitor::Config.new(retention: nil).retention_span.should eq(30.days)
+      ArrJanitor::Config.new(retention: "").retention_span.should eq(30.days)
+    end
+
+    it "raises on a malformed value" do
+      expect_raises(ArrJanitor::Config::Error, /invalid retention/) do
+        ArrJanitor::Config.new(retention: "soon").retention_span
+      end
+    end
+  end
+
+  describe "#database_path" do
+    it "returns the configured path" do
+      ArrJanitor::Config.new(database: "/var/lib/arr_janitor.db").database_path
+        .should eq("/var/lib/arr_janitor.db")
+    end
+
+    it "falls back to the default when nil or blank" do
+      ArrJanitor::Config.new(database: nil).database_path.should eq("arr_janitor.db")
+      ArrJanitor::Config.new(database: "").database_path.should eq("arr_janitor.db")
+    end
+  end
+
   describe "#matches_bad_extension?" do
     it "matches a bare extension" do
       backend = build_backend(extensions_filter: ["scr"])

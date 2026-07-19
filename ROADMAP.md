@@ -19,7 +19,7 @@ Each unit lands on its own local branch, is reviewed, and merged into `master`.
 - [x] **3. Download-client** — resolve a queue item's client (host/port/type from the *arr's
   download-client config, matched by name; creds from config) and connect to qBittorrent
   (via the `qbittorrent` shard) to `files_for(hash)`. Depends on #1.
-- [ ] **4. Logging + Janitor core** — `LogEvent` + channel-backed `Reporter` (workers emit) +
+- [x] **4. Logging + Janitor core** — `LogEvent` + channel-backed `Reporter` (workers emit) +
   a consumer that drains on the main fiber via Crystal `Log` → stdout. Janitor per-item pipeline:
   list files → match `extensions_filter` → `delete_and_blocklist` → if released, `search`;
   emits via the `Reporter`. Depends on #2, #3.

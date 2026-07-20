@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-20
+
 ### Added
 
 - **Radarr backend** — a `RadarrBackend` (via the `radarr` shard) giving Radarr
@@ -73,5 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Targets the `sonarr` and `qbittorrent` Crystal shards.
 - File logging is planned.
 
-[Unreleased]: https://github.com/mjblack/arr_janitor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mjblack/arr_janitor/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mjblack/arr_janitor/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mjblack/arr_janitor/releases/tag/v0.1.0

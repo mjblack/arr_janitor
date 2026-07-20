@@ -5,7 +5,7 @@ require "qbittorrent"
 # downloads that contain bad file extensions, and re-triggers a search when the
 # episode/movie is released.
 module ArrJanitor
-  VERSION = "0.1.0"
+  VERSION = "0.2.0"
 end
 
 # Components are picked up automatically — drop new files into src/arr_janitor/

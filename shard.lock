@@ -30,7 +30,7 @@ shards:
 
   radarr:
     git: https://github.com/mjblack/radarr.git
-    version: 0.1.0
+    version: 0.1.1
 
   sonarr:
     git: https://github.com/mjblack/sonarr.git

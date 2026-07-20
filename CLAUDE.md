@@ -6,7 +6,7 @@ Guidance for Claude Code when working in this repository.
 
 **ArrJanitor** is a Crystal **application** (long-running service). It periodically checks each configured Sonarr/Radarr **download queue** (items queued/downloading/downloaded), inspects the files inside each download for a configurable list of **bad extensions**, and when it finds one it tells the *arr to **delete + blocklist** the download, then — if the episode/movie is **released/aired** — triggers a fresh **search**.
 
-Radarr support comes later; Sonarr first.
+Both Sonarr and Radarr are supported (via the `sonarr` and `radarr` shards); they share the same config shape, selected per backend by `type: sonarr` / `type: radarr`.
 
 ## Dependencies (reuse our own shards)
 
@@ -46,7 +46,7 @@ backends:
 ## Architecture (`src/arr_janitor/`, built incrementally)
 
 - `config.cr` — `Config`/`Backend`/`DownloadClient` (`YAML::Serializable` + `JSON::Serializable`), loading, interval parsing, extension matcher, validation.
-- `backend/` — `Backend` interface + `SonarrBackend` (via the `sonarr` shard): `queue`, release-status, `delete_and_blocklist`, `search`. Also carries scheduling state: **`next_run : Time?`**, `due?(now = Time.local)` (true when `next_run.nil? || now >= next_run`), and `schedule_next(now = Time.local)` (`next_run = now + interval_span`).
+- `backend/` — `Backend` interface + `SonarrBackend` (via the `sonarr` shard) and `RadarrBackend` (via the `radarr` shard): `queue`, release-status, `delete_and_blocklist`, `search`. Also carries scheduling state: **`next_run : Time?`**, `due?(now = Time.local)` (true when `next_run.nil? || now >= next_run`), and `schedule_next(now = Time.local)` (`next_run = now + interval_span`).
 - `download_client/` — resolve + connect to qBittorrent (via the `qbittorrent` shard), `files_for(hash)`.
 - `logging` — `LogEvent` + a channel-backed `Reporter` (workers emit events) + a consumer that drains the channel on the **main fiber** and writes via Crystal's `Log`.
 - `janitor.cr` — per-item pipeline: files → bad-ext match → delete+blocklist → (if released) search; emits via the `Reporter`.

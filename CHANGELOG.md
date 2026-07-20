@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Radarr backend** — a `RadarrBackend` (via the `radarr` shard) giving Radarr
+  the same treatment as Sonarr: page through the movie-based download queue,
+  determine movie release status via Radarr's `isAvailable` flag,
+  `delete_and_blocklist` (queue delete with remove-from-client + blocklist),
+  `search` (the `MoviesSearch` command), and download-client lookup by name.
+  Configure it with `type: radarr` — the same config shape as a Sonarr backend.
+
 ### Changed
 
 - **CI/release moved to GitHub Actions** — the repo is now public on
@@ -62,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 
 - Targets the `sonarr` and `qbittorrent` Crystal shards.
-- Radarr support and file logging are planned.
+- File logging is planned.
 
 [Unreleased]: https://github.com/mjblack/arr_janitor/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/mjblack/arr_janitor/releases/tag/v0.1.0

@@ -181,7 +181,20 @@ describe ArrJanitor::CLI do
       backends.first.name.should eq("My Sonarr")
     end
 
-    it "skips a radarr backend (not yet supported)" do
+    it "builds a RadarrBackend for a radarr config backend" do
+      config = ArrJanitor::Config.new([
+        ArrJanitor::Config::Backend.new(
+          name: "My Radarr", type: ArrJanitor::Config::BackendType::Radarr,
+          url: "http://localhost:7878", api_key: "k"),
+      ])
+
+      backends = ArrJanitor::CLI.build_backends(config)
+      backends.size.should eq(1)
+      backends.first.should be_a(ArrJanitor::RadarrBackend)
+      backends.first.name.should eq("My Radarr")
+    end
+
+    it "builds both a SonarrBackend and a RadarrBackend from a mixed config" do
       config = ArrJanitor::Config.new([
         ArrJanitor::Config::Backend.new(
           name: "My Sonarr", type: ArrJanitor::Config::BackendType::Sonarr,
@@ -192,17 +205,9 @@ describe ArrJanitor::CLI do
       ])
 
       backends = ArrJanitor::CLI.build_backends(config)
-      backends.map(&.name).should eq(["My Sonarr"])
-    end
-
-    it "returns an empty array when only unsupported backends are configured" do
-      config = ArrJanitor::Config.new([
-        ArrJanitor::Config::Backend.new(
-          name: "My Radarr", type: ArrJanitor::Config::BackendType::Radarr,
-          url: "http://localhost:7878", api_key: "k"),
-      ])
-
-      ArrJanitor::CLI.build_backends(config).should be_empty
+      backends.map(&.name).should eq(["My Sonarr", "My Radarr"])
+      backends[0].should be_a(ArrJanitor::SonarrBackend)
+      backends[1].should be_a(ArrJanitor::RadarrBackend)
     end
   end
 

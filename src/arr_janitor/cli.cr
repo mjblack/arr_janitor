@@ -114,8 +114,8 @@ module ArrJanitor
     end
 
     # Builds a concrete `Backend` for each configured backend. `sonarr` backends
-    # become `SonarrBackend`s; `radarr` backends are logged and skipped (not yet
-    # supported). Returns the built backends.
+    # become `SonarrBackend`s and `radarr` backends become `RadarrBackend`s.
+    # Returns the built backends.
     def self.build_backends(config : Config) : Array(Backend)
       backends = [] of Backend
 
@@ -124,7 +124,7 @@ module ArrJanitor
         when Config::BackendType::Sonarr
           backends << SonarrBackend.new(backend_config)
         when Config::BackendType::Radarr
-          LOG.info { "radarr backend #{backend_config.name.inspect} not yet supported, skipping" }
+          backends << RadarrBackend.new(backend_config)
         else
           # A nil type is rejected by validation, so this is unreachable in
           # practice; skip defensively rather than crash.

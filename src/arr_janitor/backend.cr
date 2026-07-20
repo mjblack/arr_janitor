@@ -14,8 +14,15 @@ module ArrJanitor
     getter download_client : String?
 
     getter title : String?
+
+    # Sonarr episode/series handles (Sonarr's queue is episode-based). `nil` for
+    # a Radarr item.
     getter episode_id : Int32?
     getter series_id : Int32?
+
+    # Radarr movie handle (Radarr's queue is movie-based). `nil` for a Sonarr
+    # item.
+    getter movie_id : Int32?
 
     # Queue status (e.g. `"downloading"`, `"completed"`), lower-cased schema
     # value, or `nil` when the *arr didn't report one.
@@ -24,7 +31,7 @@ module ArrJanitor
     def initialize(@id : Int32? = nil, @download_id : String? = nil,
                    @download_client : String? = nil, @title : String? = nil,
                    @episode_id : Int32? = nil, @series_id : Int32? = nil,
-                   @status : String? = nil)
+                   @movie_id : Int32? = nil, @status : String? = nil)
     end
   end
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Pin the `radarr` dependency to **v0.1.1**, which lowers its Crystal requirement
+  to `>= 1.20.2` — removes the `Shard "radarr" may be incompatible with Crystal
+  1.20.2` warning during builds (including the Docker image build).
+
 ## [0.2.3] - 2026-07-20
 
 ### Added

@@ -22,7 +22,7 @@ dependencies:
     github: mjblack/sonarr
   radarr:
     github: mjblack/radarr
-    version: 0.1.0
+    version: 0.1.1
   qbittorrent:
     github: mjblack/qbittorrent.cr
   db:

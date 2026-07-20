@@ -163,9 +163,14 @@ module ArrJanitor
     # enabled at runtime via the `--dry-run`/`-n` CLI flag.
     property? dry_run : Bool = false
 
+    # Optional log level (one of `LOG_LEVEL_NAMES`, case-insensitive). Sits
+    # lowest in the precedence chain below the `-l`/`--log-level` flag and the
+    # `ARR_JANITOR_LOG_LEVEL` env var; an invalid value is a validation error.
+    property log_level : String?
+
     def initialize(@backends : Array(Backend) = [] of Backend,
                    @database : String? = nil, @retention : String? = nil,
-                   @dry_run : Bool = false)
+                   @dry_run : Bool = false, @log_level : String? = nil)
     end
 
     # The SQLite database path, falling back to `DEFAULT_DATABASE`.
@@ -235,6 +240,11 @@ module ArrJanitor
       return ["config must define at least one backend"] if backends.empty?
 
       errors = [] of String
+
+      if (level = log_level) && !level.blank? && ArrJanitor.parse_log_level?(level).nil?
+        errors << "invalid log_level #{level.inspect} (valid: #{LOG_LEVEL_NAMES})"
+      end
+
       backends.each_with_index do |backend, i|
         label = backend.name.blank? ? "backend ##{i + 1}" : "backend #{backend.name.inspect}"
         validate_backend(backend, label, errors)

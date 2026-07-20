@@ -1,6 +1,18 @@
 require "log"
 
 module ArrJanitor
+  # The valid `::Log::Severity` names, lowercased, for use in error messages
+  # when an invalid log level is supplied via CLI flag, env var, or config.
+  LOG_LEVEL_NAMES = "trace, debug, info, notice, warn, error, fatal, none"
+
+  # Parses *value* into a `::Log::Severity`, case-insensitively, returning `nil`
+  # when it is not a valid level name. A thin wrapper over
+  # `::Log::Severity.parse?` so callers (CLI resolver, config validation) share
+  # one parse path and one notion of "valid".
+  def self.parse_log_level?(value : String) : ::Log::Severity?
+    ::Log::Severity.parse?(value)
+  end
+
   # A single log record produced by a worker fiber. Workers never touch Crystal's
   # `Log` directly; they build `LogEvent`s (via a `Reporter`) and hand them off
   # over a channel so the main fiber can emit them in a serialized order.

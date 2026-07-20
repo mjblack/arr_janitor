@@ -45,6 +45,7 @@ samples in this repo to get started:
 ```yaml
 # database: arr_janitor.db       # optional, SQLite persistence path (default ./arr_janitor.db; overridden by --database/-D)
 # retention: 30d                 # optional, audit-log retention <int>[m|h|d] (default 30d)
+# log_level: info                # optional, trace|debug|info|notice|warn|error|fatal|none (default info)
 
 backends:
   - name: My Sonarr
@@ -73,6 +74,7 @@ Top level:
 | `backends`  | yes      | —                | Array of *arr instances to watch (at least one).  |
 | `database`  | no       | `arr_janitor.db` | SQLite persistence path. Overridden by `--database`/`-D`. |
 | `retention` | no       | `30d`            | Audit-log retention window, `<int>[m\|h\|d]`.     |
+| `log_level` | no       | `info`           | Log verbosity. One of `trace`, `debug`, `info`, `notice`, `warn`, `error`, `fatal`, `none` (case-insensitive). Overridden by `--log-level`/`-l` and `ARR_JANITOR_LOG_LEVEL`. |
 
 Each entry in `backends`:
 
@@ -139,6 +141,7 @@ bin/arr_janitor --config config.yml # ...or --config / -c
 | --------------------- | ------------------ | --------------------------------------------------------------------- |
 | `-c`, `--config <path>` | `./config.yml`   | Config file to load. Also accepted as a bare positional argument.     |
 | `-D`, `--database <path>` | config `database:`, else `./arr_janitor.db` | SQLite database path. **Overrides** the config's `database:` value. |
+| `-l`, `--log-level <level>` | env `ARR_JANITOR_LOG_LEVEL`, else config `log_level:`, else `info` | Log verbosity: `trace`, `debug`, `info`, `notice`, `warn`, `error`, `fatal`, `none` (case-insensitive). See [Logging](#logging). |
 | `-d`, `--daemon`      | off                | Run continuously (see [Run modes](#run-modes)) instead of a single pass. |
 | `-n`, `--dry-run`     | off                | Log intended actions without mutating anything or writing the store.  |
 | `-h`, `--help`        | —                  | Print usage and exit `0`.                                             |
@@ -257,9 +260,26 @@ two tables:
 
 ## Logging
 
-Logging uses Crystal's standard `Log` and writes to **stdout** at `Info` level.
-File logging is planned. All worker log events are funnelled through a single
-channel drained on the main fiber, so output stays ordered under `-Dpreview_mt`.
+Logging uses Crystal's standard `Log` and writes to **stdout**. File logging is
+planned. All worker log events are funnelled through a single channel drained on
+the main fiber, so output stays ordered under `-Dpreview_mt`.
+
+The **log level** is configurable from three sources, resolved with this
+precedence (highest first):
+
+1. `-l` / `--log-level <level>` — the CLI flag.
+2. `ARR_JANITOR_LOG_LEVEL` — an environment variable.
+3. `log_level:` — the config file.
+4. Default: `info`.
+
+Valid levels (case-insensitive) are `trace`, `debug`, `info`, `notice`, `warn`,
+`error`, `fatal`, and `none`. An invalid value from **any** source fails fast
+with a clear error listing the valid levels rather than silently falling back.
+
+```sh
+bin/arr_janitor -l debug config.yml          # via the flag
+ARR_JANITOR_LOG_LEVEL=warn bin/arr_janitor   # via the environment
+```
 
 ## Development
 

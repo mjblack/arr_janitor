@@ -198,9 +198,18 @@ Mount your config read-only and a writable data volume:
 docker run --rm \
   -v ./config.yml:/config/config.yml:ro \
   -v ./data:/data \
+  -e PUID=$(id -u) -e PGID=$(id -g) \
   -e CRYSTAL_WORKERS=4 \
   arr_janitor
 ```
+
+**Volume permissions (`PUID`/`PGID`).** The container's entrypoint runs as root
+only to `chown` the mounted `/data` to `PUID:PGID` (default `1000:1000`), then
+drops to that user via `gosu`. This fixes the common case where `docker compose
+up` / `docker run` creates a **root-owned** `./data` that the non-root app can't
+write (which otherwise shows up as a "cannot open the database" error). Set
+`PUID`/`PGID` to your host user (`id -u` / `id -g`) so the mount stays writable
+and the DB files are owned by you. `/config` is read-only and left untouched.
 
 The default `CMD` runs
 `arr_janitor --config /config/config.yml --database /data/arr_janitor.db --daemon`

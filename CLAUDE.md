@@ -92,13 +92,17 @@ merge to `master`, then trigger the workflow (`gh workflow run release.yml`).
 
 ### Docker
 - **`Dockerfile`** — multi-stage (`crystallang/crystal:1.20.2` builder →
-  `debian:12-slim` runtime), builds the binary `-Dpreview_mt --release`, runs as
-  a non-root user, `VOLUME [/config, /data]`. Default CMD passes the paths
-  explicitly and runs in **daemon mode**:
-  `--config /config/config.yml --database /data/arr_janitor.db --daemon`, so the
-  DB persists in the mounted `/data` volume with no config changes needed. Both
-  deps are public, so `shards install --production` runs with no token or
-  BuildKit secret.
+  `debian:12-slim` runtime), builds the binary `-Dpreview_mt --release`,
+  `VOLUME [/config, /data]`. Default CMD passes the paths explicitly and runs in
+  **daemon mode**: `--config /config/config.yml --database /data/arr_janitor.db
+  --daemon`, so the DB persists in the mounted `/data` volume with no config
+  changes needed. Both deps are public, so `shards install --production` runs
+  with no token or BuildKit secret.
+- **`docker-entrypoint.sh`** — runs as root only to `chown /data` to
+  `PUID`/`PGID` (default 1000:1000), then drops to that user via `gosu` and execs
+  `arr_janitor`. Fixes root-owned bind-mounted `./data` (created by the docker
+  daemon on `docker compose up`) so the non-root app can write the DB. `/config`
+  is read-only and untouched.
 - **`.dockerignore`** keeps the build context lean (but keeps `shard.yml`,
   `shard.lock`, `src/`).
 - **`docker-compose.yml`** — user-facing example running the published image;

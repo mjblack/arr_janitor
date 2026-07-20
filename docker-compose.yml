@@ -1,12 +1,10 @@
 # Minimal example: run the published ArrJanitor image as a daemon.
 #
-# The image's default CMD runs ArrJanitor in daemon mode (--daemon) against
-# /config/config.yml. Mount your config read-only and a writable data volume.
-#
-# IMPORTANT: set `database: /data/arr_janitor.db` in your config.yml so the
-# SQLite database is written to the mounted /data volume and persists across
-# container restarts (the default `arr_janitor.db` would live in the container's
-# ephemeral working directory and be lost).
+# The image's default CMD runs ArrJanitor in daemon mode, passing the paths
+# explicitly: `--config /config/config.yml --database /data/arr_janitor.db
+# --daemon`. So the SQLite database is written to the mounted /data volume and
+# persists across container restarts with no config changes needed — just mount
+# your config read-only and a writable data volume.
 services:
   arr-janitor:
     image: ghcr.io/mjblack/arr_janitor:latest

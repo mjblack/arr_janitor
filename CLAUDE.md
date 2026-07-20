@@ -61,7 +61,7 @@ backends:
 
 - Install deps: `shards install`
 - Build (multi-threaded): `shards build -Dpreview_mt` (binary in `bin/arr_janitor`) or `crystal build -Dpreview_mt src/arr_janitor.cr`
-- Run: `bin/arr_janitor <config.yml> [-d]` (default: one scan pass then exit; `-d`/`--daemon`: continuous scheduler; optionally `CRYSTAL_WORKERS=<n>`)
+- Run: `bin/arr_janitor [<config.yml>|-c <path>] [-D <db>] [-d] [-n]` — config path defaults to `./config.yml` (bare positional or `-c`/`--config`); `-D`/`--database` sets the SQLite path (overrides config `database:`, else `./arr_janitor.db`); `-d`/`--daemon` runs the continuous scheduler (default: one scan pass then exit); `-n`/`--dry-run` logs intended actions only; `-h`/`--help` prints usage. Note `-d` (daemon, no value) vs `-D` (database, takes a value). Optionally `CRYSTAL_WORKERS=<n>`.
 - Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec` (specs may run without `-Dpreview_mt`)
 
 ## Workflow (GitHub, PR-based)
@@ -93,13 +93,17 @@ merge to `master`, then trigger the workflow (`gh workflow run release.yml`).
 ### Docker
 - **`Dockerfile`** — multi-stage (`crystallang/crystal:1.20.2` builder →
   `debian:12-slim` runtime), builds the binary `-Dpreview_mt --release`, runs as
-  a non-root user, `VOLUME [/config, /data]`, default CMD runs in **daemon mode**
-  (`--daemon`). Both deps are public, so `shards install --production` runs with
-  no token or BuildKit secret.
+  a non-root user, `VOLUME [/config, /data]`. Default CMD passes the paths
+  explicitly and runs in **daemon mode**:
+  `--config /config/config.yml --database /data/arr_janitor.db --daemon`, so the
+  DB persists in the mounted `/data` volume with no config changes needed. Both
+  deps are public, so `shards install --production` runs with no token or
+  BuildKit secret.
 - **`.dockerignore`** keeps the build context lean (but keeps `shard.yml`,
   `shard.lock`, `src/`).
 - **`docker-compose.yml`** — user-facing example running the published image;
-  note the config's `database:` should point at `/data/arr_janitor.db`.
+  the image's default CMD already writes the DB to `/data`, so no config change
+  is needed to persist it.
 
 ## Gotchas
 - `shard.lock` **is** committed (this is an app).

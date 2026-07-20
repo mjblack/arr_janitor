@@ -43,7 +43,7 @@ samples in this repo to get started:
 - [`config.example.json`](config.example.json)
 
 ```yaml
-# database: arr_janitor.db       # optional, SQLite persistence path (default arr_janitor.db)
+# database: arr_janitor.db       # optional, SQLite persistence path (default ./arr_janitor.db; overridden by --database/-D)
 # retention: 30d                 # optional, audit-log retention <int>[m|h|d] (default 30d)
 
 backends:
@@ -71,7 +71,7 @@ Top level:
 | Key         | Required | Default          | Notes                                             |
 | ----------- | -------- | ---------------- | ------------------------------------------------- |
 | `backends`  | yes      | —                | Array of *arr instances to watch (at least one).  |
-| `database`  | no       | `arr_janitor.db` | SQLite persistence path.                          |
+| `database`  | no       | `arr_janitor.db` | SQLite persistence path. Overridden by `--database`/`-D`. |
 | `retention` | no       | `30d`            | Audit-log retention window, `<int>[m\|h\|d]`.     |
 
 Each entry in `backends`:
@@ -128,9 +128,27 @@ the SQLite dev headers to build — e.g. `apt-get install libsqlite3-dev`).
 ```sh
 shards install
 shards build -Dpreview_mt           # produces bin/arr_janitor
+bin/arr_janitor                     # defaults to ./config.yml
 bin/arr_janitor config.yml          # bare path...
 bin/arr_janitor --config config.yml # ...or --config / -c
 ```
+
+### CLI flags
+
+| Flag                  | Default            | Notes                                                                 |
+| --------------------- | ------------------ | --------------------------------------------------------------------- |
+| `-c`, `--config <path>` | `./config.yml`   | Config file to load. Also accepted as a bare positional argument.     |
+| `-D`, `--database <path>` | config `database:`, else `./arr_janitor.db` | SQLite database path. **Overrides** the config's `database:` value. |
+| `-d`, `--daemon`      | off                | Run continuously (see [Run modes](#run-modes)) instead of a single pass. |
+| `-n`, `--dry-run`     | off                | Log intended actions without mutating anything or writing the store.  |
+| `-h`, `--help`        | —                  | Print usage and exit `0`.                                             |
+
+Both paths **default to the current working directory** (`./config.yml` and
+`./arr_janitor.db`). The database path resolves with the precedence
+**`--database`/`-D` > config `database:` > `./arr_janitor.db`**.
+
+> Note the case: `-d` is `--daemon` (a flag, no value) while `-D` is
+> `--database` (takes a path value). They are distinct.
 
 ### Run modes
 
@@ -184,21 +202,19 @@ docker run --rm \
   arr_janitor
 ```
 
-The default `CMD` runs `arr_janitor --config /config/config.yml --daemon`
-(continuous). For a **one-shot** run (single scan pass, then exit), override the
-command and drop `--daemon`:
+The default `CMD` runs
+`arr_janitor --config /config/config.yml --database /data/arr_janitor.db --daemon`
+(continuous). Because the paths are passed explicitly, the SQLite database lands
+on the mounted `/data` volume and survives container restarts **with no config
+changes needed**. For a **one-shot** run (single scan pass, then exit), override
+the command and drop `--daemon`:
 
 ```sh
 docker run --rm \
   -v ./config.yml:/config/config.yml:ro \
   -v ./data:/data \
-  arr_janitor --config /config/config.yml
+  arr_janitor --config /config/config.yml --database /data/arr_janitor.db
 ```
-
-> **Set `database: /data/arr_janitor.db` in your config** so the SQLite database
-> lands on the mounted `/data` volume and survives container restarts. The
-> default (`arr_janitor.db`) would live in the container's ephemeral working
-> directory and be lost.
 
 ### docker-compose
 
@@ -219,9 +235,10 @@ services:
 
 ## Persistence
 
-State is kept in a SQLite database at `database` (default `arr_janitor.db`),
-opened in WAL mode with a busy timeout so the backend fibers can write
-concurrently. It holds two tables:
+State is kept in a SQLite database at the resolved database path (`--database`/`-D`
+override, else the config's `database:`, else `./arr_janitor.db`), opened in WAL
+mode with a busy timeout so the backend fibers can write concurrently. It holds
+two tables:
 
 - **`processed_downloads`** — an audit log of every download ArrJanitor has acted
   on (backend, download id, title, action, matched extensions, timestamp). Rows

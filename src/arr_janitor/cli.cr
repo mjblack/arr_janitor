@@ -18,9 +18,14 @@ module ArrJanitor
     # given — a `config.yml` in the current working directory.
     DEFAULT_CONFIG = "config.yml"
 
+    # Environment variable holding the log level. Sits below `-l`/`--log-level`
+    # but above the config's `log_level:` in the precedence chain.
+    LOG_LEVEL_ENV = "ARR_JANITOR_LOG_LEVEL"
+
     # One-line usage string, printed for `-h`/`--help` and on parse errors.
     USAGE = "usage: arr_janitor [<config.yml> | -c|--config <path>] " \
-            "[-D|--database <path>] [-d|--daemon] [-n|--dry-run] [-h|--help]"
+            "[-D|--database <path>] [-l|--log-level <level>] " \
+            "[-d|--daemon] [-n|--dry-run] [-h|--help]"
 
     # Parses *argv*, loads + validates the config, builds the backends and runs
     # the scheduler. Prints config errors to STDERR and exits non-zero.
@@ -38,7 +43,7 @@ module ArrJanitor
           exit 1
         end
 
-      ArrJanitor.setup_logging
+      ArrJanitor.setup_logging(resolve_log_level(argv, config))
 
       backends = build_backends(config)
       if backends.empty?
@@ -95,7 +100,7 @@ module ArrJanitor
     # that flag's value, so it must never be mistaken for the bare positional
     # config path (nor for a boolean flag). Note the case distinction: `-D` is
     # `--database` (a value flag) while `-d` is `--daemon` (a boolean flag).
-    VALUE_FLAGS = {"--config", "-c", "--database", "-D"}
+    VALUE_FLAGS = {"--config", "-c", "--database", "-D", "--log-level", "-l"}
 
     # The resolved config path from *argv*: an explicit `--config`/`-c` value or,
     # failing that, the first bare positional argument, defaulting to
@@ -134,6 +139,53 @@ module ArrJanitor
         i += 1
       end
       nil
+    end
+
+    # The `--log-level`/`-l` value from *argv*, or `nil` when absent. The value
+    # after another value flag (e.g. a `-c`/`--config` path) is skipped so it is
+    # never mistaken for the log level. `-l` is distinct from `-d`/`-D`/`-n`.
+    def self.log_level_arg(argv : Array(String)) : String?
+      i = 0
+      while i < argv.size
+        arg = argv[i]
+        if arg == "--log-level" || arg == "-l"
+          return argv[i + 1]?
+        elsif VALUE_FLAGS.includes?(arg)
+          i += 1 # skip this value flag's value
+        end
+        i += 1
+      end
+      nil
+    end
+
+    # Resolves the effective log level from *argv* and *config*, applying the
+    # precedence (highest first): `-l`/`--log-level` → `ARR_JANITOR_LOG_LEVEL`
+    # env → config `log_level:` → `Info`. The first non-blank source wins and is
+    # parsed via `ArrJanitor.parse_log_level?`; an invalid value from that source
+    # prints a clear error to STDERR listing the valid levels and exits `1`
+    # (matching how `run` handles config/store errors) rather than silently
+    # falling back. Returns `Info` when every source is nil/blank.
+    def self.resolve_log_level(argv : Array(String), config : Config) : ::Log::Severity
+      chosen =
+        first_present(log_level_arg(argv)) ||
+          first_present(ENV[LOG_LEVEL_ENV]?) ||
+          first_present(config.log_level)
+
+      return ::Log::Severity::Info if chosen.nil?
+
+      if level = ArrJanitor.parse_log_level?(chosen)
+        level
+      else
+        STDERR.puts "invalid log level #{chosen.inspect} (valid: #{LOG_LEVEL_NAMES})"
+        exit 1
+      end
+    end
+
+    # Returns *value* stripped when it is non-nil and non-blank, else `nil`.
+    private def self.first_present(value : String?) : String?
+      return nil if value.nil?
+      stripped = value.strip
+      stripped.blank? ? nil : stripped
     end
 
     # Whether *argv* requests a dry run via `--dry-run`/`-n`. Combined with the

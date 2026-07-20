@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Configurable log level via `-l`/`--log-level`, `ARR_JANITOR_LOG_LEVEL` env, or
+  `log_level:` config (precedence in that order; default info). (#15)
+
 ## [0.2.2] - 2026-07-20
 
 ### Fixed

@@ -61,7 +61,7 @@ backends:
 
 - Install deps: `shards install`
 - Build (multi-threaded): `shards build -Dpreview_mt` (binary in `bin/arr_janitor`) or `crystal build -Dpreview_mt src/arr_janitor.cr`
-- Run: `bin/arr_janitor [<config.yml>|-c <path>] [-D <db>] [-d] [-n]` — config path defaults to `./config.yml` (bare positional or `-c`/`--config`); `-D`/`--database` sets the SQLite path (overrides config `database:`, else `./arr_janitor.db`); `-d`/`--daemon` runs the continuous scheduler (default: one scan pass then exit); `-n`/`--dry-run` logs intended actions only; `-h`/`--help` prints usage. Note `-d` (daemon, no value) vs `-D` (database, takes a value). Optionally `CRYSTAL_WORKERS=<n>`.
+- Run: `bin/arr_janitor [<config.yml>|-c <path>] [-D <db>] [-l <level>] [-d] [-n]` — config path defaults to `./config.yml` (bare positional or `-c`/`--config`); `-D`/`--database` sets the SQLite path (overrides config `database:`, else `./arr_janitor.db`); `-l`/`--log-level` sets the log verbosity (`trace|debug|info|notice|warn|error|fatal|none`, precedence `-l` > `ARR_JANITOR_LOG_LEVEL` env > config `log_level:` > `info`); `-d`/`--daemon` runs the continuous scheduler (default: one scan pass then exit); `-n`/`--dry-run` logs intended actions only; `-h`/`--help` prints usage. Note `-d` (daemon, no value) vs `-D` (database, takes a value) vs `-l` (log-level, takes a value). Optionally `CRYSTAL_WORKERS=<n>`.
 - Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec` (specs may run without `-Dpreview_mt`)
 
 ## Workflow (GitHub, PR-based)

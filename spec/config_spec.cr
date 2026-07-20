@@ -261,6 +261,24 @@ describe ArrJanitor::Config do
         config_with(backend).validate
       end
     end
+
+    it "accepts a valid log_level" do
+      config = ArrJanitor::Config.new([build_backend], log_level: "debug")
+      config.validation_errors.should be_empty
+    end
+
+    it "accepts a nil log_level" do
+      config = ArrJanitor::Config.new([build_backend], log_level: nil)
+      config.validation_errors.should be_empty
+    end
+
+    it "fails on an invalid log_level, naming the bad value and valid levels" do
+      config = ArrJanitor::Config.new([build_backend], log_level: "bogus")
+      errors = config.validation_errors
+      errors.any?(&.includes?("log_level")).should be_true
+      errors.any?(&.includes?("bogus")).should be_true
+      errors.any?(&.includes?("trace, debug, info, notice, warn, error, fatal, none")).should be_true
+    end
   end
 end
 

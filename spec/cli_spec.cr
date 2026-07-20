@@ -77,6 +77,26 @@ private class StubBackend < ArrJanitor::Backend
   end
 end
 
+# Runs the block with `ARR_JANITOR_LOG_LEVEL` set to *value* (or unset when nil),
+# restoring the prior value afterwards so tests don't leak env state.
+private def with_env_log_level(value : String?, &)
+  previous = ENV["ARR_JANITOR_LOG_LEVEL"]?
+  if value.nil?
+    ENV.delete("ARR_JANITOR_LOG_LEVEL")
+  else
+    ENV["ARR_JANITOR_LOG_LEVEL"] = value
+  end
+  begin
+    yield
+  ensure
+    if previous.nil?
+      ENV.delete("ARR_JANITOR_LOG_LEVEL")
+    else
+      ENV["ARR_JANITOR_LOG_LEVEL"] = previous
+    end
+  end
+end
+
 describe ArrJanitor::CLI do
   describe ".config_path" do
     it "reads a bare positional argument" do
@@ -147,6 +167,74 @@ describe ArrJanitor::CLI do
     it "falls back to arr_janitor.db when neither is given" do
       config = ArrJanitor::Config.new
       private_resolve.call([] of String, config).should eq("arr_janitor.db")
+    end
+  end
+
+  describe ".log_level_arg" do
+    it "reads the value after --log-level" do
+      ArrJanitor::CLI.log_level_arg(["--log-level", "debug"]).should eq("debug")
+    end
+
+    it "reads the value after -l" do
+      ArrJanitor::CLI.log_level_arg(["-l", "warn"]).should eq("warn")
+    end
+
+    it "returns nil when no --log-level/-l flag is given" do
+      ArrJanitor::CLI.log_level_arg(["config.yml"]).should be_nil
+      ArrJanitor::CLI.log_level_arg([] of String).should be_nil
+    end
+
+    it "is not confused with the daemon/dry-run flags" do
+      ArrJanitor::CLI.log_level_arg(["-d", "config.yml"]).should be_nil
+      ArrJanitor::CLI.log_level_arg(["-n", "config.yml"]).should be_nil
+    end
+
+    it "does not treat a -l value as the config path" do
+      # -l takes a value; with no positional the config must fall back to the
+      # default, NOT be the log level.
+      ArrJanitor::CLI.config_path(["-l", "debug"]).should eq("config.yml")
+      ArrJanitor::CLI.config_path(["--log-level", "debug"]).should eq("config.yml")
+    end
+
+    it "reads the positional config even when a -l value precedes it" do
+      ArrJanitor::CLI.config_path(["-l", "debug", "config.yml"]).should eq("config.yml")
+    end
+  end
+
+  describe ".resolve_log_level" do
+    it "defaults to Info when no source is set" do
+      with_env_log_level(nil) do
+        config = ArrJanitor::Config.new
+        ArrJanitor::CLI.resolve_log_level([] of String, config).should eq(::Log::Severity::Info)
+      end
+    end
+
+    it "uses the config log_level when neither CLI nor env is set" do
+      with_env_log_level(nil) do
+        config = ArrJanitor::Config.new(log_level: "error")
+        ArrJanitor::CLI.resolve_log_level([] of String, config).should eq(::Log::Severity::Error)
+      end
+    end
+
+    it "prefers the env var over the config log_level" do
+      with_env_log_level("warn") do
+        config = ArrJanitor::Config.new(log_level: "error")
+        ArrJanitor::CLI.resolve_log_level([] of String, config).should eq(::Log::Severity::Warn)
+      end
+    end
+
+    it "prefers the CLI flag over the env var and config" do
+      with_env_log_level("warn") do
+        config = ArrJanitor::Config.new(log_level: "error")
+        ArrJanitor::CLI.resolve_log_level(["-l", "debug"], config).should eq(::Log::Severity::Debug)
+      end
+    end
+
+    it "parses case-insensitively" do
+      with_env_log_level(nil) do
+        config = ArrJanitor::Config.new
+        ArrJanitor::CLI.resolve_log_level(["--log-level", "TRACE"], config).should eq(::Log::Severity::Trace)
+      end
     end
   end
 

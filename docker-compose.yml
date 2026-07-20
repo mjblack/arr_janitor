@@ -20,6 +20,8 @@ services:
     environment:
       # Number of Crystal (-Dpreview_mt) worker threads.
       - CRYSTAL_WORKERS=4
+      # Log verbosity: trace|debug|info|notice|warn|error|fatal|none (default info).
+      # - ARR_JANITOR_LOG_LEVEL=info
       # Match your host user so ./data stays writable and DB files are yours.
       - PUID=1000
       - PGID=1000

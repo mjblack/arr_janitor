@@ -36,6 +36,33 @@ describe ArrJanitor::Store do
         FileUtils.rm_rf(dir)
       end
     end
+
+    it "creates a missing parent directory instead of failing to connect" do
+      base = File.tempname("arr_janitor_store")
+      path = File.join(base, "nested", "test.db")
+      begin
+        Dir.exists?(File.dirname(path)).should be_false
+        store = ArrJanitor::Store.open(path)
+        File.exists?(path).should be_true
+        store.close
+      ensure
+        FileUtils.rm_rf(base)
+      end
+    end
+
+    it "raises Store::Error (not a bare DB::ConnectionRefused) when the path can't be opened" do
+      dir = File.tempname("arr_janitor_store")
+      Dir.mkdir_p(dir)
+      begin
+        # Opening a *directory* as the database file fails in SQLite; it must
+        # surface as a clear Store::Error, not an unhandled DB::ConnectionRefused.
+        expect_raises(ArrJanitor::Store::Error, /cannot open SQLite database/) do
+          ArrJanitor::Store.open(dir)
+        end
+      ensure
+        FileUtils.rm_rf(dir)
+      end
+    end
   end
 
   describe "#record_processed / #processed?" do

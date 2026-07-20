@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Database open failures no longer crash the app** — a missing parent directory
+  for the configured `database:` path is now created automatically instead of
+  raising an unhandled `DB::ConnectionRefused`; any genuinely unopenable path
+  fails with a clear `Store::Error` and a clean exit rather than a stack trace.
+  (#5)
+
 ## [0.2.0] - 2026-07-20
 
 ### Added

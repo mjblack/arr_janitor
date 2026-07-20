@@ -47,7 +47,13 @@ module ArrJanitor
       # In dry-run the store is never opened, so no database file is created and
       # the retention-sweep fiber never starts (a nil store/retention is a no-op
       # in `Scheduler`). Only log the persistence path when a store is opened.
-      store = build_store(config, effective_dry_run)
+      store =
+        begin
+          build_store(config, effective_dry_run)
+        rescue ex : Store::Error
+          STDERR.puts ex.message
+          exit 1
+        end
       LOG.info { "persistence database: #{config.database_path}" } unless store.nil?
 
       janitor = Janitor.new(store: store, dry_run: effective_dry_run)

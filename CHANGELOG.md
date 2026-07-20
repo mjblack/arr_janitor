@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-19
+
 ### Added
 
 - **Configuration** — `Config`/`Backend`/`DownloadClient` models
@@ -53,4 +55,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Targets the `sonarr` and `qbittorrent` Crystal shards.
 - Radarr support and file logging are planned.
 
-[Unreleased]: https://gitscm.mjbh.net/mblack/arr_janitor
+[Unreleased]: https://gitscm.mjbh.net/mblack/arr_janitor/compare/v0.1.0...HEAD
+[0.1.0]: https://gitscm.mjbh.net/mblack/arr_janitor/releases/tag/v0.1.0

@@ -63,13 +63,15 @@ ENV CRYSTAL_WORKERS=4
 
 USER arrjanitor
 
-# Default working directory is the writable data volume, so the config's
-# default `database: arr_janitor.db` (relative) lands in /data even if the user
-# doesn't set an absolute path.
+# Working directory is the writable data volume. The database location no longer
+# depends on the CWD — it is set explicitly by the `--database` param below — but
+# a writable WORKDIR is kept as a harmless sane default.
 WORKDIR /data
 
-# Run as a daemon by default (continuous scheduler). Override CMD without
-# --daemon for a single-pass run:
-#   docker run ... arr_janitor --config /config/config.yml
+# Run as a daemon by default (continuous scheduler), reading the config from
+# /config and writing the database to /data — both passed explicitly so they land
+# on the mounted volumes regardless of the CWD. Override CMD without --daemon for
+# a single-pass run:
+#   docker run ... arr_janitor --config /config/config.yml --database /data/arr_janitor.db
 ENTRYPOINT ["arr_janitor"]
-CMD ["--config", "/config/config.yml", "--daemon"]
+CMD ["--config", "/config/config.yml", "--database", "/data/arr_janitor.db", "--daemon"]

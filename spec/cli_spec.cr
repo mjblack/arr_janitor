@@ -91,8 +91,62 @@ describe ArrJanitor::CLI do
       ArrJanitor::CLI.config_path(["-c", "/etc/aj.yml"]).should eq("/etc/aj.yml")
     end
 
-    it "returns nil when no path is given" do
-      ArrJanitor::CLI.config_path([] of String).should be_nil
+    it "defaults to config.yml (in CWD) when no path is given" do
+      ArrJanitor::CLI.config_path([] of String).should eq("config.yml")
+    end
+
+    it "does not treat a --database/-D value as the config path" do
+      # -D takes a value; with no positional the config must fall back to the
+      # default, NOT be the database path.
+      ArrJanitor::CLI.config_path(["-D", "/data/db.sqlite"]).should eq("config.yml")
+      ArrJanitor::CLI.config_path(["--database", "/data/db.sqlite"]).should eq("config.yml")
+    end
+
+    it "reads the positional config even when a -D value precedes it" do
+      ArrJanitor::CLI.config_path(["-D", "/data/db.sqlite", "config.yml"]).should eq("config.yml")
+    end
+  end
+
+  describe ".database_arg" do
+    it "reads the value after --database" do
+      ArrJanitor::CLI.database_arg(["--database", "/data/db.sqlite"]).should eq("/data/db.sqlite")
+    end
+
+    it "reads the value after -D" do
+      ArrJanitor::CLI.database_arg(["-D", "/data/db.sqlite"]).should eq("/data/db.sqlite")
+    end
+
+    it "returns nil when no --database/-D flag is given" do
+      ArrJanitor::CLI.database_arg(["config.yml"]).should be_nil
+      ArrJanitor::CLI.database_arg([] of String).should be_nil
+    end
+
+    it "is not confused with the daemon flag (-d vs -D)" do
+      ArrJanitor::CLI.database_arg(["-d", "config.yml"]).should be_nil
+      ArrJanitor::CLI.daemon?(["-D", "/data/db.sqlite"]).should be_false
+    end
+  end
+
+  describe "database path precedence" do
+    # Resolves exactly as CLI.run does: --database/-D overrides config database:,
+    # which falls back to DEFAULT_DATABASE.
+    private_resolve = ->(argv : Array(String), config : ArrJanitor::Config) do
+      ArrJanitor::CLI.database_arg(argv) || config.database_path
+    end
+
+    it "uses the --database override when given, over the config value" do
+      config = ArrJanitor::Config.new(database: "config.db")
+      private_resolve.call(["-D", "/override.db"], config).should eq("/override.db")
+    end
+
+    it "uses the config database: value when no --database is given" do
+      config = ArrJanitor::Config.new(database: "config.db")
+      private_resolve.call([] of String, config).should eq("config.db")
+    end
+
+    it "falls back to arr_janitor.db when neither is given" do
+      config = ArrJanitor::Config.new
+      private_resolve.call([] of String, config).should eq("arr_janitor.db")
     end
   end
 
@@ -216,9 +270,8 @@ describe ArrJanitor::CLI do
       dir = File.tempname("arr_janitor_cli_dryrun")
       Dir.mkdir_p(dir)
       db_path = File.join(dir, "dryrun.db")
-      config = ArrJanitor::Config.new(database: db_path)
       begin
-        ArrJanitor::CLI.build_store(config, dry_run: true).should be_nil
+        ArrJanitor::CLI.build_store(dry_run: true, path: db_path).should be_nil
         # Strict dry-run must not touch the filesystem.
         File.exists?(db_path).should be_false
       ensure
@@ -230,9 +283,8 @@ describe ArrJanitor::CLI do
       dir = File.tempname("arr_janitor_cli_dryrun")
       Dir.mkdir_p(dir)
       db_path = File.join(dir, "live.db")
-      config = ArrJanitor::Config.new(database: db_path)
       begin
-        store = ArrJanitor::CLI.build_store(config, dry_run: false)
+        store = ArrJanitor::CLI.build_store(dry_run: false, path: db_path)
         store.should be_a(ArrJanitor::Store)
         File.exists?(db_path).should be_true
         store.try &.close
@@ -243,13 +295,12 @@ describe ArrJanitor::CLI do
   end
 
   describe ".build_store" do
-    it "opens a functional store at the configured database path" do
+    it "opens a functional store at the given database path" do
       dir = File.tempname("arr_janitor_cli_store")
       Dir.mkdir_p(dir)
       db_path = File.join(dir, "cli.db")
-      config = ArrJanitor::Config.new(database: db_path)
       begin
-        store = ArrJanitor::CLI.build_store(config)
+        store = ArrJanitor::CLI.build_store(dry_run: false, path: db_path).as(ArrJanitor::Store)
         begin
           File.exists?(db_path).should be_true
           store.record_processed("sonarr", "H", "T", "removed_blocklisted", ["exe"])
@@ -266,10 +317,9 @@ describe ArrJanitor::CLI do
       dir = File.tempname("arr_janitor_cli_store")
       Dir.mkdir_p(dir)
       db_path = File.join(dir, "cli.db")
-      config = ArrJanitor::Config.new(database: db_path)
       begin
         # Open the store exactly as CLI.run does (via CLI.build_store).
-        store = ArrJanitor::CLI.build_store(config)
+        store = ArrJanitor::CLI.build_store(dry_run: false, path: db_path).as(ArrJanitor::Store)
         begin
           backend_config = ArrJanitor::Config::Backend.new(
             name: "Test Sonarr", type: ArrJanitor::Config::BackendType::Sonarr,

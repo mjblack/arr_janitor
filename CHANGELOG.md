@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Config & database paths now take CLI params and default to the current
+  directory** — `-c`/`--config` (default `./config.yml`) and the new
+  `-D`/`--database` (SQLite path, overriding the config's `database:` value)
+  can be passed on the command line; running with no args now tries
+  `./config.yml` instead of printing usage. The Docker image passes both paths
+  explicitly (`--config /config/config.yml --database /data/arr_janitor.db
+  --daemon`) so the database persists in the mounted `/data` volume with no
+  config changes needed. (#7)
+
 ### Fixed
 
 - **Database open failures no longer crash the app** — a missing parent directory

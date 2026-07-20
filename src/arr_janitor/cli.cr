@@ -14,18 +14,25 @@ module ArrJanitor
     # straight to `Log` rather than through the worker `Reporter`.
     LOG = ::Log.for("arr_janitor.cli")
 
+    # Config path used when neither `--config`/`-c` nor a bare positional is
+    # given — a `config.yml` in the current working directory.
+    DEFAULT_CONFIG = "config.yml"
+
+    # One-line usage string, printed for `-h`/`--help` and on parse errors.
+    USAGE = "usage: arr_janitor [<config.yml> | -c|--config <path>] " \
+            "[-D|--database <path>] [-d|--daemon] [-n|--dry-run] [-h|--help]"
+
     # Parses *argv*, loads + validates the config, builds the backends and runs
     # the scheduler. Prints config errors to STDERR and exits non-zero.
     def self.run(argv : Array(String)) : Nil
-      path = config_path(argv)
-      if path.nil?
-        STDERR.puts "usage: arr_janitor <config.yml> | --config <path> [-d|--daemon] [--dry-run|-n]"
-        exit 1
+      if help?(argv)
+        puts USAGE
+        exit 0
       end
 
       config =
         begin
-          load_config(path)
+          load_config(config_path(argv))
         rescue ex : Config::Error
           STDERR.puts ex.message
           exit 1
@@ -44,17 +51,21 @@ module ArrJanitor
         LOG.warn { "DRY RUN enabled — no downloads will be deleted, blocklisted, or searched" }
       end
 
+      # Precedence: `--database`/`-D` overrides the config's `database:`, which
+      # in turn falls back to `DEFAULT_DATABASE`.
+      db_path = database_arg(argv) || config.database_path
+
       # In dry-run the store is never opened, so no database file is created and
       # the retention-sweep fiber never starts (a nil store/retention is a no-op
       # in `Scheduler`). Only log the persistence path when a store is opened.
       store =
         begin
-          build_store(config, effective_dry_run)
+          build_store(effective_dry_run, db_path)
         rescue ex : Store::Error
           STDERR.puts ex.message
           exit 1
         end
-      LOG.info { "persistence database: #{config.database_path}" } unless store.nil?
+      LOG.info { "persistence database: #{db_path}" } unless store.nil?
 
       janitor = Janitor.new(store: store, dry_run: effective_dry_run)
       scheduler = Scheduler.new(backends, janitor,
@@ -72,31 +83,55 @@ module ArrJanitor
     end
 
     # Selects the `Store` for this run: `nil` in dry-run (strictly read-only, so
-    # no database file is created), otherwise the opened store. The store-wiring
-    # decision is factored out here so it can be unit-tested without starting the
-    # scheduler.
-    def self.build_store(config : Config, dry_run : Bool) : Store?
+    # no database file is created), otherwise the store opened (creating if
+    # necessary) at *path*. Factored out so the store wiring is unit-testable
+    # without starting the scheduler.
+    def self.build_store(dry_run : Bool, path : String) : Store?
       return nil if dry_run
-      build_store(config)
+      Store.open(path)
     end
 
-    # Opens (creating if necessary) the SQLite `Store` at the configured
-    # `database_path`. Factored out so the store wiring is unit-testable without
-    # starting the scheduler.
-    def self.build_store(config : Config) : Store
-      Store.open(config.database_path)
-    end
+    # The value-taking flags. The argument immediately after one of these is
+    # that flag's value, so it must never be mistaken for the bare positional
+    # config path (nor for a boolean flag). Note the case distinction: `-D` is
+    # `--database` (a value flag) while `-d` is `--daemon` (a boolean flag).
+    VALUE_FLAGS = {"--config", "-c", "--database", "-D"}
 
-    # Extracts the config path from *argv*: a bare first argument, or the value
-    # following `--config`/`-c`. Returns `nil` when none is given.
-    def self.config_path(argv : Array(String)) : String?
-      argv.each_with_index do |arg, i|
-        case arg
-        when "--config", "-c"
-          return argv[i + 1]?
-        else
-          return arg unless arg.starts_with?('-')
+    # The resolved config path from *argv*: an explicit `--config`/`-c` value or,
+    # failing that, the first bare positional argument, defaulting to
+    # `DEFAULT_CONFIG`. The argument following any value flag (e.g. a `-D`/
+    # `--database` path) is skipped, never returned as the config path.
+    def self.config_path(argv : Array(String)) : String
+      i = 0
+      while i < argv.size
+        arg = argv[i]
+        if arg == "--config" || arg == "-c"
+          value = argv[i + 1]?
+          return value unless value.nil?
+        elsif VALUE_FLAGS.includes?(arg)
+          i += 1 # skip this value flag's value
+        elsif !arg.starts_with?('-')
+          return arg
         end
+        i += 1
+      end
+      DEFAULT_CONFIG
+    end
+
+    # The `--database`/`-D` override from *argv*, or `nil` when absent. When set
+    # it takes precedence over the config's `database:` value. The value after a
+    # `-c`/`--config` is skipped so a config path that happens to look like `-D`
+    # is not mistaken for this flag.
+    def self.database_arg(argv : Array(String)) : String?
+      i = 0
+      while i < argv.size
+        arg = argv[i]
+        if arg == "--database" || arg == "-D"
+          return argv[i + 1]?
+        elsif VALUE_FLAGS.includes?(arg)
+          i += 1 # skip this value flag's value
+        end
+        i += 1
       end
       nil
     end
@@ -111,6 +146,11 @@ module ArrJanitor
     # When absent the CLI runs a single scan pass and exits.
     def self.daemon?(argv : Array(String)) : Bool
       argv.any? { |arg| arg == "--daemon" || arg == "-d" }
+    end
+
+    # Whether *argv* requests the usage message via `--help`/`-h`.
+    def self.help?(argv : Array(String)) : Bool
+      argv.any? { |arg| arg == "--help" || arg == "-h" }
     end
 
     # Loads and validates the config at *path*. Raises `Config::Error` on a

@@ -1,4 +1,4 @@
-# database: arr_janitor.db       # optional, SQLite persistence path (default arr_janitor.db)
+# database: arr_janitor.db       # optional, SQLite persistence path (default ./arr_janitor.db; overridden by --database/-D)
 # retention: 30d                 # optional, audit-log retention <int>[m|h|d] (default 30d)
 # dry_run: false                 # optional, log intended actions without mutating (also --dry-run/-n)
 

@@ -1,12 +1,16 @@
 # Gitea Actions CI for ArrJanitor.
 #
-# INERT UNTIL CONFIGURED. This workflow does nothing until BOTH of the following
-# exist:
+# Requirements (all in place):
 #   1. A registered Gitea Actions runner able to pick up `ubuntu-latest` jobs.
-#   2. A repository/organisation secret named `GH_TOKEN` holding a GitHub
-#      Personal Access Token with *read* access to the private dependency repos
-#      `mjblack/sonarr` and `mjblack/qbittorrent.cr`. `shards install` fetches
-#      these from GitHub over HTTPS, so without the token the install step fails.
+#   2. A repository secret `GH_TOKEN` — a GitHub token with *read* access to the
+#      private dependency repos `mjblack/sonarr` and `mjblack/qbittorrent.cr`.
+#      `shards install` fetches these from GitHub over HTTPS.
+#
+# TLS: the Gitea server (gitscm.mjbh.net) uses an internal CA (mjbh-JINX-CA) that
+# the runner's ephemeral job containers do not trust, so `GIT_SSL_NO_VERIFY` is
+# set to let git clone the repo. The runner is on a trusted internal network. To
+# restore verification later, install the CA into the runner's job containers and
+# drop the env below.
 #
 # Crystal is pinned to 1.20.2 on purpose: the dev dependency ameba 1.6.4 does not
 # build on newer Crystal releases.
@@ -22,23 +26,43 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Run inside the official Crystal 1.20.2 image so Crystal + shards are
+    # already present. This avoids the crystal-lang/install-crystal action,
+    # which queries the GitHub API on every run and was failing from the runner
+    # (secondary rate limiting / transient GitHub errors). Image pins 1.20.2
+    # (ameba 1.6.4 does not build on newer Crystal).
+    container:
+      image: crystallang/crystal:1.20.2
+    env:
+      # Internal CA (mjbh-JINX-CA) is not trusted by the job container; skip git
+      # TLS verification for the checkout on the trusted internal network.
+      GIT_SSL_NO_VERIFY: "true"
+      # Ensure a valid zoneinfo name for Crystal's Time.local.
+      TZ: "UTC"
     steps:
+      # The Crystal image has no Node.js, so the JS-based actions/checkout can't
+      # run here (this runner doesn't inject node into custom containers). Check
+      # out manually with git; GIT_SSL_NO_VERIFY (job env) handles the internal
+      # CA and the Gitea token authenticates the private repo.
       - name: Checkout
-        uses: actions/checkout@v4
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config --global --add safe.directory '*'
+          host="${GITHUB_SERVER_URL#https://}"
+          git init -q
+          git remote add origin "https://${GITEA_TOKEN}@${host}/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}" || git fetch --depth=1 origin "${GITHUB_REF}"
+          git checkout -q --detach FETCH_HEAD
 
-      # crystal-sqlite3 links against libsqlite3 and needs its dev headers.
-      - name: Install libsqlite3
+      # crystal-sqlite3 links against libsqlite3 and needs its dev headers;
+      # tzdata provides the zoneinfo Crystal's Time.local needs; ca-certificates
+      # for the HTTPS shards clones from GitHub.
+      - name: Install system libraries
         run: |
           apt-get update
-          apt-get install -y libsqlite3-dev
-
-      # Pin Crystal to 1.20.2 (ameba 1.6.4 does not build on newer Crystal).
-      # If install-crystal is unavailable on the runner, replace this step with a
-      # manual install of Crystal 1.20.2 (e.g. from the official tarball/apt repo).
-      - name: Install Crystal
-        uses: crystal-lang/install-crystal@v1
-        with:
-          crystal: "1.20.2"
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libsqlite3-dev tzdata ca-certificates
 
       # Route GitHub HTTPS clones through the GH_TOKEN secret so `shards install`
       # can fetch the private sonarr / qbittorrent.cr dependencies.

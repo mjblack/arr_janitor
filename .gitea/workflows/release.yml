@@ -1,16 +1,21 @@
 # Gitea Actions release workflow for ArrJanitor.
 #
-# INERT UNTIL CONFIGURED. This workflow does nothing until ALL of the following
-# exist:
+# Requirements:
 #   1. A registered Gitea Actions runner able to pick up `ubuntu-latest` jobs.
-#   2. A repository/organisation secret named `GH_TOKEN` holding a GitHub
-#      Personal Access Token with *read* access to the private dependency repos
-#      `mjblack/sonarr` and `mjblack/qbittorrent.cr` (used by `shards install`
-#      in the test job and passed as a BuildKit secret to the image build).
-#   3. Credentials able to push to the Gitea container registry
-#      `gitscm.mjbh.net`: the built-in `GITHUB_TOKEN` (a.k.a. the Gitea Actions
-#      token) needs `package:write`. If it lacks that scope, define a dedicated
-#      `REGISTRY_TOKEN` secret and substitute it in the login step below.
+#   2. A repository secret `GH_TOKEN` — a GitHub token with *read* access to the
+#      private dependency repos `mjblack/sonarr` and `mjblack/qbittorrent.cr`
+#      (used by `shards install` in the test job and passed as a BuildKit secret
+#      to the image build). [in place]
+#   3. Registry push to `gitscm.mjbh.net`: the built-in `GITHUB_TOKEN` needs
+#      `package:write` (else define a `REGISTRY_TOKEN` secret and substitute it).
+#      NOTE: because the registry uses the internal CA (mjbh-JINX-CA), the
+#      runner's Docker daemon must also trust that CA (or list gitscm.mjbh.net as
+#      an insecure registry in /etc/docker/daemon.json) for the image push to
+#      succeed — that is host/daemon config, not settable from this workflow.
+#
+# TLS: git and curl calls to the Gitea server skip verification
+# (GIT_SSL_NO_VERIFY / curl -k) because the internal CA is not trusted by the
+# job containers. Runner is on a trusted internal network.
 #
 # Release model mirrors the sonarr repo: this workflow is triggered MANUALLY
 # (workflow_dispatch). It does NOT trigger on tag push — the workflow itself
@@ -30,21 +35,34 @@ jobs:
   # --------------------------------------------------------------------------
   test:
     runs-on: ubuntu-latest
+    # Runs inside the official Crystal 1.20.2 image (Crystal + shards present),
+    # avoiding the install-crystal action's flaky GitHub API lookup. Pins 1.20.2.
+    container:
+      image: crystallang/crystal:1.20.2
+    env:
+      GIT_SSL_NO_VERIFY: "true"  # internal CA not trusted by job container
+      TZ: "UTC"                  # valid zoneinfo name for Crystal Time.local
     steps:
+      # The Crystal image has no Node.js, so JS-based actions/checkout can't run
+      # here — check out manually with git (GIT_SSL_NO_VERIFY handles the CA).
       - name: Checkout
-        uses: actions/checkout@v4
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          git config --global --add safe.directory '*'
+          host="${GITHUB_SERVER_URL#https://}"
+          git init -q
+          git remote add origin "https://${GITEA_TOKEN}@${host}/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 origin "${GITHUB_SHA}" || git fetch --depth=1 origin "${GITHUB_REF}"
+          git checkout -q --detach FETCH_HEAD
 
-      # crystal-sqlite3 links against libsqlite3 and needs its dev headers.
-      - name: Install libsqlite3
+      # crystal-sqlite3 links against libsqlite3 and needs its dev headers;
+      # tzdata for Crystal's Time.local; ca-certificates for GitHub shards clones.
+      - name: Install system libraries
         run: |
           apt-get update
-          apt-get install -y libsqlite3-dev
-
-      # Pin Crystal to 1.20.2 (ameba 1.6.4 does not build on newer Crystal).
-      - name: Install Crystal
-        uses: crystal-lang/install-crystal@v1
-        with:
-          crystal: "1.20.2"
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libsqlite3-dev tzdata ca-certificates
 
       # Route GitHub HTTPS clones through the GH_TOKEN secret so `shards install`
       # can fetch the private sonarr / qbittorrent.cr dependencies.
@@ -76,6 +94,8 @@ jobs:
   release:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      GIT_SSL_NO_VERIFY: "true"  # internal CA not trusted by job container
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -152,7 +172,9 @@ jobs:
           echo "Creating release v${VERSION} at ${api}"
           # target_commitish + a non-existent tag_name makes Gitea create the tag
           # from the checked-out commit; generate_release_notes fills the body.
-          http_code="$(curl -sS -o /tmp/release_response.json -w '%{http_code}' \
+          # -k: the Gitea server uses the internal CA (mjbh-JINX-CA) that the job
+          # container does not trust; the runner is on a trusted internal network.
+          http_code="$(curl -sSk -o /tmp/release_response.json -w '%{http_code}' \
             -X POST "${api}" \
             -H "Authorization: token ${GITEA_TOKEN}" \
             -H "Content-Type: application/json" \

@@ -9,7 +9,7 @@
 # ephemeral working directory and be lost).
 services:
   arr-janitor:
-    image: gitscm.mjbh.net/mblack/arr_janitor:latest
+    image: ghcr.io/mjblack/arr_janitor:latest
     restart: unless-stopped
     volumes:
       - ./config.yml:/config/config.yml:ro

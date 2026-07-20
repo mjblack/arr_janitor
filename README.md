@@ -1,7 +1,7 @@
 # ArrJanitor
 
 ArrJanitor is a long-running Crystal service that watches the download queues of
-your **Sonarr** instances (Radarr is planned) and cleans up junk downloads
+your **Sonarr** and **Radarr** instances and cleans up junk downloads
 automatically.
 
 For every queued/downloading/downloaded item it inspects the files inside the
@@ -79,7 +79,7 @@ Each entry in `backends`:
 | Key                 | Required | Default | Notes                                                     |
 | ------------------- | -------- | ------- | --------------------------------------------------------- |
 | `name`              | yes      | —       | Human-readable label (used in logs).                      |
-| `type`              | yes      | —       | `sonarr` or `radarr` (`radarr` is parsed but not yet run).|
+| `type`              | yes      | —       | `sonarr` or `radarr`.                                     |
 | `url`               | yes      | —       | Base URL of the *arr instance.                            |
 | `api_key`           | yes      | —       | The *arr API key.                                         |
 | `interval`          | no       | `20m`   | Poll interval, `<int>[m\|h\|d]`.                          |

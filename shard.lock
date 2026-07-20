@@ -28,6 +28,10 @@ shards:
     git: https://github.com/mjblack/qbittorrent.cr.git
     version: 0.2.0
 
+  radarr:
+    git: https://github.com/mjblack/radarr.git
+    version: 0.1.0+git.commit.1e205a806fb6fab9fa06101428b47ac5e215b0dc
+
   sonarr:
     git: https://github.com/mjblack/sonarr.git
     version: 0.2.0

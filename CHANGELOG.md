@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-20
+
 ### Fixed
 
 - **Docker: can't open the database on a root-owned bind-mounted `/data`** — the
@@ -14,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `1000:1000`) and drops privileges via `gosu`, so `docker compose up` as a
   non-root user no longer fails with a "cannot open the database" error when the
   daemon created `./data` root-owned. Set `PUID`/`PGID` to your host user. (#10)
+- **qBittorrent 404 no longer aborts a scan** — when a queue item's torrent is no
+  longer in qBittorrent (HTTP 404), the janitor skips that item with a warning and
+  continues instead of letting `QBittorrent::ApiError` propagate; other
+  download-client API errors are handled the same way. (#11)
 
 ## [0.2.1] - 2026-07-20
 
@@ -104,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Targets the `sonarr` and `qbittorrent` Crystal shards.
 - File logging is planned.
 
-[Unreleased]: https://github.com/mjblack/arr_janitor/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/mjblack/arr_janitor/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/mjblack/arr_janitor/releases/tag/v0.2.2
 [0.2.1]: https://github.com/mjblack/arr_janitor/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mjblack/arr_janitor/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mjblack/arr_janitor/releases/tag/v0.1.0

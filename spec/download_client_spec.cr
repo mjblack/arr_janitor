@@ -74,5 +74,24 @@ describe ArrJanitor::DownloadClient do
         ArrJanitor::DownloadClient::QBittorrent.extract_paths(empty).should be_empty
       end
     end
+
+    describe ".translate_api_error" do
+      it "maps a 404 to TorrentNotFound" do
+        api_error = QBittorrent::ApiError.new(404, "Not Found")
+        error = ArrJanitor::DownloadClient::QBittorrent.translate_api_error("HASH", api_error)
+        error.should be_a(ArrJanitor::DownloadClient::TorrentNotFound)
+        error.message.to_s.should contain("HASH")
+        error.message.to_s.should contain("404")
+        error.cause.should eq(api_error)
+      end
+
+      it "maps other non-2xx statuses to a generic Error carrying the cause" do
+        api_error = QBittorrent::ApiError.new(409, "Conflict")
+        error = ArrJanitor::DownloadClient::QBittorrent.translate_api_error("HASH", api_error)
+        error.should be_a(ArrJanitor::DownloadClient::Error)
+        error.should_not be_a(ArrJanitor::DownloadClient::TorrentNotFound)
+        error.cause.should eq(api_error)
+      end
+    end
   end
 end

@@ -70,7 +70,16 @@ module ArrJanitor
       hash = item.download_id
       return if hash.nil?
 
-      files = client.files_for(hash)
+      files =
+        begin
+          client.files_for(hash)
+        rescue DownloadClient::TorrentNotFound
+          reporter.warn(source, "torrent for #{item.title.inspect} not found in '#{name}'; skipping")
+          return
+        rescue ex : DownloadClient::Error
+          reporter.warn(source, "could not list files for #{item.title.inspect} from '#{name}': #{ex.message}; skipping")
+          return
+        end
       bad = files.select { |path| backend.config.matches_bad_extension?(path) }
 
       if bad.empty?

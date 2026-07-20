@@ -203,6 +203,50 @@ describe ArrJanitor::Janitor do
       backend.deleted.should be_empty
     end
 
+    it "skips (with a warning) an item whose torrent is not found in the client" do
+      gone = queue_item(id: 1, download_id: "GONE", download_client: "qbit",
+        title: "Missing", episode_id: 5)
+      good = queue_item(id: 2, download_id: "GOOD", download_client: "qbit",
+        title: "Fine", episode_id: 6)
+      backend = StubBackend.new(build_config, [gone, good], qbit_info)
+      backend.released = true
+
+      resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+        DownloadClientErrorClient.new(
+          "GONE", ArrJanitor::DownloadClient::TorrentNotFound.new("torrent GONE not found (HTTP 404)"))
+      end
+      events = capture(backend, ArrJanitor::Janitor.new(resolver))
+
+      # The scan completed and the healthy second item was still processed.
+      backend.deleted.should eq([good])
+      backend.searched.should eq([good])
+      # Warned about the missing torrent, but did not error out.
+      events.any? { |e| e.severity.warn? && e.message.includes?("Missing") && e.message.includes?("not found") }.should be_true
+      events.any?(&.severity.error?).should be_false
+    end
+
+    it "skips (with a warning) an item whose file listing raises a generic client error" do
+      broken = queue_item(id: 1, download_id: "BROKEN", download_client: "qbit",
+        title: "Broken", episode_id: 5)
+      good = queue_item(id: 2, download_id: "GOOD", download_client: "qbit",
+        title: "Fine", episode_id: 6)
+      backend = StubBackend.new(build_config, [broken, good], qbit_info)
+      backend.released = true
+
+      resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
+        DownloadClientErrorClient.new(
+          "BROKEN", ArrJanitor::DownloadClient::Error.new("qBittorrent API error: HTTP 409"))
+      end
+      events = capture(backend, ArrJanitor::Janitor.new(resolver))
+
+      # The failing item was skipped without a delete/blocklist/search, and the
+      # healthy second item was still processed.
+      backend.deleted.should eq([good])
+      backend.searched.should eq([good])
+      events.any? { |e| e.severity.warn? && e.message.includes?("Broken") && e.message.includes?("could not list files") }.should be_true
+      events.any?(&.severity.error?).should be_false
+    end
+
     it "logs and continues when one item raises, still processing the rest" do
       bad = queue_item(id: 1, download_id: "BAD", download_client: "qbit",
         title: "Explodes", episode_id: 5)
@@ -331,6 +375,19 @@ end
 private class FailingThenBadClient < ArrJanitor::DownloadClient
   def files_for(hash : String) : Array(String)
     raise "kaboom" if hash == "BAD"
+    ["virus.exe"]
+  end
+end
+
+# Raises a specific `DownloadClient::Error` for one *failing_hash* and returns a
+# bad file for anything else, exercising the janitor's download-client error
+# handling while proving the scan continues past the failing item.
+private class DownloadClientErrorClient < ArrJanitor::DownloadClient
+  def initialize(@failing_hash : String, @error : ArrJanitor::DownloadClient::Error)
+  end
+
+  def files_for(hash : String) : Array(String)
+    raise @error if hash == @failing_hash
     ["virus.exe"]
   end
 end

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docker: can't open the database on a root-owned bind-mounted `/data`** — the
+  image now runs an entrypoint that `chown`s `/data` to `PUID`/`PGID` (default
+  `1000:1000`) and drops privileges via `gosu`, so `docker compose up` as a
+  non-root user no longer fails with a "cannot open the database" error when the
+  daemon created `./data` root-owned. Set `PUID`/`PGID` to your host user. (#10)
+
 ## [0.2.1] - 2026-07-20
 
 ### Changed

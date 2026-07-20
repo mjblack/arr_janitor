@@ -5,6 +5,11 @@
 # --daemon`. So the SQLite database is written to the mounted /data volume and
 # persists across container restarts with no config changes needed — just mount
 # your config read-only and a writable data volume.
+#
+# PUID/PGID: the container's entrypoint chowns /data to these and runs the app as
+# that user, so the bind-mounted ./data works even when `docker compose up`
+# created it root-owned. Set them to your host user (`id -u` / `id -g`) so the DB
+# files are owned by you; they default to 1000:1000.
 services:
   arr-janitor:
     image: ghcr.io/mjblack/arr_janitor:latest
@@ -15,3 +20,6 @@ services:
     environment:
       # Number of Crystal (-Dpreview_mt) worker threads.
       - CRYSTAL_WORKERS=4
+      # Match your host user so ./data stays writable and DB files are yours.
+      - PUID=1000
+      - PGID=1000

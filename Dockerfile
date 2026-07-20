@@ -43,16 +43,17 @@ FROM debian:12-slim
 # client; tzdata for correct local-time handling.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       libsqlite3-0 libyaml-0-2 ca-certificates tzdata \
+       libsqlite3-0 libyaml-0-2 ca-certificates tzdata gosu \
     && rm -rf /var/lib/apt/lists/*
 
-# Run as a dedicated non-root user. /config holds the mounted config, /data the
-# SQLite database — both owned by the runtime user so it can read/write them.
-RUN useradd --system --uid 10001 --create-home --home-dir /home/arrjanitor arrjanitor \
-    && mkdir -p /config /data \
-    && chown arrjanitor:arrjanitor /config /data
+# /config holds the mounted (read-only) config; /data holds the SQLite database.
+# No fixed runtime user is baked in — the entrypoint fixes /data ownership and
+# drops privileges at startup (see below).
+RUN mkdir -p /config /data
 
 COPY --from=build /app/bin/arr_janitor /usr/local/bin/arr_janitor
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Persist config and the database across container restarts.
 VOLUME ["/config", "/data"]
@@ -61,17 +62,19 @@ VOLUME ["/config", "/data"]
 # overridable at run time (e.g. -e CRYSTAL_WORKERS=8).
 ENV CRYSTAL_WORKERS=4
 
-USER arrjanitor
+# The app runs as this UID/GID. At startup the entrypoint (as root) chowns the
+# bind-mounted /data to PUID:PGID — fixing the common case where `docker compose
+# up` creates a root-owned ./data — then drops to that user via gosu. Set these
+# to your host user so the mount stays writable and the DB files are owned by you.
+ENV PUID=1000 PGID=1000
 
-# Working directory is the writable data volume. The database location no longer
-# depends on the CWD — it is set explicitly by the `--database` param below — but
-# a writable WORKDIR is kept as a harmless sane default.
+# Working directory is the writable data volume. The database location is set
+# explicitly by the `--database` param below, not by the CWD.
 WORKDIR /data
 
-# Run as a daemon by default (continuous scheduler), reading the config from
-# /config and writing the database to /data — both passed explicitly so they land
-# on the mounted volumes regardless of the CWD. Override CMD without --daemon for
-# a single-pass run:
-#   docker run ... arr_janitor --config /config/config.yml --database /data/arr_janitor.db
-ENTRYPOINT ["arr_janitor"]
+# The entrypoint chowns /data to PUID:PGID, then drops privileges (gosu) and runs
+# arr_janitor with the CMD below. Runs as a daemon by default; override CMD
+# without --daemon for a single-pass run:
+#   docker run ... --config /config/config.yml --database /data/arr_janitor.db
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--config", "/config/config.yml", "--database", "/data/arr_janitor.db", "--daemon"]

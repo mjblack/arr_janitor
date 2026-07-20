@@ -20,6 +20,13 @@ module ArrJanitor
     # How long a writer waits for a competing writer's lock before giving up.
     BUSY_TIMEOUT = 5.seconds
 
+    # Raised when the database at `path` cannot be opened — e.g. its parent
+    # directory is missing and cannot be created, or the path is not a writable
+    # file. Carries an actionable message instead of a bare `DB::ConnectionRefused`
+    # (which SQLite surfaces, with an empty message, when it can't open the file).
+    class Error < Exception
+    end
+
     # Opens (creating if necessary) the SQLite database at `path`, enables WAL
     # mode + a busy timeout, runs the schema migrations, and returns a ready
     # `Store`. The `path` is a plain filesystem path (not a `sqlite3://` URI).
@@ -38,11 +45,33 @@ module ArrJanitor
     # filenames so this is fine in practice; a path containing URI-significant
     # characters (e.g. `?` or `#`) would need escaping.
     def self.open(path : String) : Store
+      ensure_parent_dir(path)
+
       millis = BUSY_TIMEOUT.total_milliseconds.to_i
       database = DB.open("sqlite3://#{path}?journal_mode=wal&busy_timeout=#{millis}")
       store = new(database)
       store.migrate
       store
+    rescue ex : DB::Error
+      # SQLite surfaces a `DB::ConnectionRefused` (a `DB::Error`) when it can't
+      # open the file — e.g. the path is a directory or is not writable. Re-raise
+      # as a clear `Store::Error` so the CLI reports it and exits, rather than
+      # crashing with an unhandled stack trace.
+      raise Error.new(
+        "cannot open SQLite database at #{path.inspect}: #{ex.message.try(&.presence) || ex.class}. " \
+        "Ensure its parent directory exists and is writable.", cause: ex)
+    end
+
+    # Creates the parent directory of `path` if missing, so opening the database
+    # doesn't fail just because the configured directory (e.g. `./data`, or a
+    # container's `/data`) hasn't been created yet.
+    private def self.ensure_parent_dir(path : String) : Nil
+      dir = File.dirname(path)
+      return if dir.empty? || dir == "."
+      Dir.mkdir_p(dir) unless Dir.exists?(dir)
+    rescue ex : File::Error
+      raise Error.new(
+        "cannot create database directory #{File.dirname(path).inspect}: #{ex.message}", cause: ex)
     end
 
     # Wraps an already-open `DB::Database`. Prefer `Store.open`.

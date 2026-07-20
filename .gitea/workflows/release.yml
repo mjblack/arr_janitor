@@ -8,10 +8,10 @@
 #      to the image build). [in place]
 #   3. Registry push to `gitscm.mjbh.net`: the built-in `GITHUB_TOKEN` needs
 #      `package:write` (else define a `REGISTRY_TOKEN` secret and substitute it).
-#      NOTE: because the registry uses the internal CA (mjbh-JINX-CA), the
-#      runner's Docker daemon must also trust that CA (or list gitscm.mjbh.net as
-#      an insecure registry in /etc/docker/daemon.json) for the image push to
-#      succeed — that is host/daemon config, not settable from this workflow.
+#      The registry uses the internal CA (mjbh-JINX-CA); rather than requiring the
+#      runner's Docker daemon to trust it, the BuildKit builder is configured to
+#      treat gitscm.mjbh.net as an insecure registry (skip TLS verify) and auth is
+#      written directly to the docker config — so no runner-host changes needed.
 #
 # TLS: git and curl calls to the Gitea server skip verification
 # (GIT_SSL_NO_VERIFY / curl -k) because the internal CA is not trusted by the
@@ -120,20 +120,29 @@ jobs:
           fi
           echo "VERSION=${shard_version}" >> "$GITHUB_ENV"
 
+      # The registry (gitscm.mjbh.net) uses the internal CA (mjbh-JINX-CA) that
+      # the runner's Docker daemon does not trust, so configure the BuildKit
+      # builder to treat it as an insecure registry (skip TLS verification) for
+      # the push. Runner is on a trusted internal network.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      # Log in to the Gitea container registry. The built-in GITHUB_TOKEN needs
-      # package:write; substitute `secrets.REGISTRY_TOKEN` here if it does not.
-      # Fallback if docker/login-action is unavailable on the runner:
-      #   echo "${{ secrets.GITHUB_TOKEN }}" | docker login gitscm.mjbh.net \
-      #     -u "${{ github.actor }}" --password-stdin
-      - name: Log in to Gitea container registry
-        uses: docker/login-action@v3
         with:
-          registry: gitscm.mjbh.net
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          buildkitd-config-inline: |
+            [registry."gitscm.mjbh.net"]
+              insecure = true
+
+      # Write registry credentials directly rather than running `docker login`,
+      # which performs a TLS handshake through the (untrusting) daemon and would
+      # fail. BuildKit reads these creds from the docker config when pushing.
+      # GITHUB_TOKEN needs package:write (else substitute a REGISTRY_TOKEN secret).
+      - name: Configure registry auth
+        env:
+          REG_USER: ${{ github.actor }}
+          REG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.docker"
+          auth="$(printf '%s:%s' "$REG_USER" "$REG_TOKEN" | base64 -w0)"
+          printf '{"auths":{"gitscm.mjbh.net":{"auth":"%s"}}}\n' "$auth" > "$HOME/.docker/config.json"
 
       # Build the image and push :<version> and :latest. GH_TOKEN is passed as a
       # BuildKit secret (secret-id `ghtoken`, matching the Dockerfile mount) so

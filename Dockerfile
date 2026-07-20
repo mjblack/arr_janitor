@@ -1,18 +1,10 @@
-# syntax=docker/dockerfile:1
-#
 # Multi-stage build for ArrJanitor.
 #
-# The private dependencies (mjblack/sonarr, mjblack/qbittorrent.cr) are fetched
-# from GitHub over HTTPS by `shards install`, so the builder needs a GitHub token
-# with *read* access to those repos. That token is passed in as a BuildKit
-# *secret* (never an ARG/ENV) so it is not baked into any image layer.
+# Both dependencies (mjblack/sonarr, mjblack/qbittorrent.cr) are public GitHub
+# repos, so `shards install` fetches them over HTTPS with no token or secret.
 #
-# Build (BuildKit required):
-#   DOCKER_BUILDKIT=1 docker build \
-#     --secret id=ghtoken,env=GH_TOKEN \
-#     -t arr_janitor .
-#
-# (GH_TOKEN must be exported in the environment running the build.)
+# Build:
+#   docker build -t arr_janitor .
 
 # ---------------------------------------------------------------------------
 # Builder stage: compile a release binary with the multi-threaded runtime.
@@ -30,13 +22,8 @@ WORKDIR /app
 # only re-runs when the manifests change. shard.lock IS committed for this app.
 COPY shard.yml shard.lock ./
 
-# Fetch dependencies. The GitHub token is mounted as a BuildKit secret at
-# /run/secrets/ghtoken and used only to route HTTPS clones through the token;
-# it never lands in a layer. If the secret is absent (e.g. all deps public),
-# the install still runs without it.
-RUN --mount=type=secret,id=ghtoken \
-    sh -c 'if [ -f /run/secrets/ghtoken ]; then git config --global url."https://$(cat /run/secrets/ghtoken)@github.com/".insteadOf "https://github.com/"; fi' \
-    && shards install --production
+# Fetch dependencies. Both deps are public GitHub repos, so no token is needed.
+RUN shards install --production
 
 # Copy the rest of the source and build the release binary. -Dpreview_mt enables
 # Crystal's multi-threaded runtime (backend fibers run across threads).

@@ -64,39 +64,38 @@ backends:
 - Run: `bin/arr_janitor <config.yml> [-d]` (default: one scan pass then exit; `-d`/`--daemon`: continuous scheduler; optionally `CRYSTAL_WORKERS=<n>`)
 - Format: `crystal tool format` (check: `--check`) · Lint: `bin/ameba` · Specs: `crystal spec` (specs may run without `-Dpreview_mt`)
 
-## Workflow (Gitea, PR-based)
+## Workflow (GitHub, PR-based)
 
-Repo: **`gitscm.mjbh.net/mblack/arr_janitor`** (remote `origin` = `git@gitscm.mjbh.net:mblack/arr_janitor.git`, SSH). Work is tracked as **Gitea issues** via the `tea` CLI (`tea issues|pr list/create/merge --repo mblack/arr_janitor`).
+Repo: **`github.com/mjblack/arr_janitor`** (PUBLIC; remote `origin` = GitHub, a `gitea` remote is kept for reference). Work is tracked as **GitHub issues** via the `gh` CLI (`gh issue|pr list/create/merge --repo mjblack/arr_janitor`).
 
-Flow per unit (mirrors the GitHub flow, on Gitea):
+Flow per unit:
 1. A subagent implements the unit on a **feature branch** in its own worktree and commits (no push).
-2. The coordinator **pushes the branch** (`git push -u origin <branch>`) and opens a **PR** (`tea pr create --head <branch> --base master --title … --description …`).
+2. The coordinator **pushes the branch** (`git push -u origin <branch>`) and opens a **PR** (`gh pr create --head <branch> --base master --title … --body …`).
 3. **pr-reviewer** reviews the diff.
-4. Coordinator **squash-merges** (`tea pr merge <n> --style squash`) with `closes #<issue>` so Gitea closes the issue, then `git fetch` + fast-forward local `master`.
+4. Coordinator **squash-merges** (`gh pr merge <n> --squash`) with `closes #<issue>` so GitHub closes the issue, then `git fetch` + fast-forward local `master`.
 
-`ROADMAP.md` is the higher-level unit map (its numbering predates the Gitea issues).
+`ROADMAP.md` is the higher-level unit map (its numbering predates the issues).
 
 ## Releases
 
 The version lives in **two** places that must always agree: `version:` in
 `shard.yml` and `ArrJanitor::VERSION` in `src/arr_janitor.cr`. Keep them in sync.
 
-Release is driven by **`.gitea/workflows/release.yml`**, a **manually triggered**
-(`workflow_dispatch`) workflow that mirrors the sonarr model: it is **CI-gated**
-(a `test` job replicates `ci.yml`), then a `release` job asserts the two version
-locations match, **builds and pushes** the container image to the Gitea registry
-(`gitscm.mjbh.net/mblack/arr_janitor:<version>` and `:latest`), and **creates the
-`v<version>` tag + a Gitea release** with generated notes. Never tag/release by
-hand — bump both version locations (+ CHANGELOG) via a PR, merge to `master`,
-then trigger the workflow. Like `ci.yml`, it is **inert** until a Gitea Actions
-runner, the `GH_TOKEN` secret, and registry push credentials exist.
+Release is driven by **`.github/workflows/release.yml`**, a **manually triggered**
+(`workflow_dispatch`) GitHub Actions workflow that mirrors the sonarr model: it is
+**CI-gated** (a `test` job replicates `ci.yml`), then a `release` job asserts the
+two version locations match, **builds and pushes** the container image to GHCR
+(`ghcr.io/mjblack/arr_janitor:<version>` and `:latest`), and **creates the
+`v<version>` tag + a GitHub release** (`gh release create --generate-notes`).
+Never tag/release by hand — bump both version locations (+ CHANGELOG) via a PR,
+merge to `master`, then trigger the workflow (`gh workflow run release.yml`).
 
 ### Docker
 - **`Dockerfile`** — multi-stage (`crystallang/crystal:1.20.2` builder →
   `debian:12-slim` runtime), builds the binary `-Dpreview_mt --release`, runs as
   a non-root user, `VOLUME [/config, /data]`, default CMD runs in **daemon mode**
-  (`--daemon`). Private deps are fetched using a **BuildKit secret** (`id=ghtoken`)
-  so the `GH_TOKEN` never lands in a layer.
+  (`--daemon`). Both deps are public, so `shards install --production` runs with
+  no token or BuildKit secret.
 - **`.dockerignore`** keeps the build context lean (but keeps `shard.yml`,
   `shard.lock`, `src/`).
 - **`docker-compose.yml`** — user-facing example running the published image;
@@ -104,4 +103,4 @@ runner, the `GH_TOKEN` secret, and registry push credentials exist.
 
 ## Gotchas
 - `shard.lock` **is** committed (this is an app).
-- Deps are private repos on GitHub — `shards install` needs the `gh` credential helper (HTTPS) configured.
+- Both deps (`mjblack/sonarr`, `mjblack/qbittorrent.cr`) are **public** GitHub repos — `shards install` needs no token or credential helper.

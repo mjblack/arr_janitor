@@ -1,0 +1,45 @@
+name: CI
+
+# Gates every pull request and every push to master: installs Crystal and the
+# (public) dependencies, checks formatting, lints with ameba, builds the binary,
+# and runs the offline spec suite. Both runtime dependencies (mjblack/sonarr and
+# mjblack/qbittorrent.cr) are public, so `shards install` needs no token.
+on:
+  pull_request: {}
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # crystal-sqlite3 links against libsqlite3 and needs its dev headers to build.
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libsqlite3-dev
+
+      # Crystal is pinned to 1.20.2: the dev dependency ameba 1.6.4 does not build
+      # on newer (>1.20.x) Crystal releases.
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.20.2"
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Check formatting
+        run: crystal tool format --check
+
+      - name: Lint (ameba)
+        run: bin/ameba
+
+      - name: Build
+        run: crystal build -Dpreview_mt src/main.cr -o bin/arr_janitor
+
+      - name: Run specs
+        run: crystal spec

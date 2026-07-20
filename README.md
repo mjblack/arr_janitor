@@ -165,15 +165,11 @@ user. The container runs in **daemon mode by default**.
 
 ### Build locally
 
-The private `sonarr`/`qbittorrent.cr` dependencies are fetched from GitHub during
-the build, so it needs a GitHub token with read access to those repos. The token
-is passed as a **BuildKit secret** (never baked into a layer):
+Both `sonarr`/`qbittorrent.cr` dependencies are public GitHub repos, so the
+build fetches them over HTTPS with no token or secret:
 
 ```sh
-export GH_TOKEN=ghp_your_read_token
-DOCKER_BUILDKIT=1 docker build \
-  --secret id=ghtoken,env=GH_TOKEN \
-  -t arr_janitor .
+docker build -t arr_janitor .
 ```
 
 ### Run
@@ -212,7 +208,7 @@ image:
 ```yaml
 services:
   arr-janitor:
-    image: gitscm.mjbh.net/mblack/arr_janitor:latest
+    image: ghcr.io/mjblack/arr_janitor:latest
     restart: unless-stopped
     volumes:
       - ./config.yml:/config/config.yml:ro
@@ -247,15 +243,16 @@ crystal tool format       # format (add --check to verify in CI)
 bin/ameba src/ spec/      # lint
 ```
 
-Continuous integration lives in [`.gitea/workflows/ci.yml`](.gitea/workflows/ci.yml)
-(Gitea Actions). It is **inert until a Gitea Actions runner is registered and a
-`GH_TOKEN` secret is defined** for fetching the private `sonarr`/`qbittorrent`
-dependencies — see the comments in that file.
+Continuous integration lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+(GitHub Actions): it installs Crystal and the public `sonarr`/`qbittorrent`
+dependencies, checks formatting, lints, builds, and runs the spec suite on every
+pull request and every push to `master`.
 
 ## Contributing
 
-Issues and pull requests are tracked in the project's Gitea instance. Please run
-the format, lint and spec commands above before opening a PR.
+Issues and pull requests are tracked on GitHub at
+[`github.com/mjblack/arr_janitor`](https://github.com/mjblack/arr_janitor).
+Please run the format, lint and spec commands above before opening a PR.
 
 ## License
 

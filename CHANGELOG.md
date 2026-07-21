@@ -7,11 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-21
+
+### Added
+
+- Native Linux packages: the Release workflow now builds a **`.deb`** and an
+  **`.rpm`** (via nfpm) and attaches them to the GitHub release. Each installs
+  the binary to `/usr/bin/arr_janitor`, a **systemd service** that runs
+  `arr_janitor --daemon --config /etc/arr_janitor/config.yaml --database
+  /var/lib/arr_janitor/arr_janitor.db` as a dedicated `arr_janitor` system user,
+  and creates `/etc/arr_janitor` (with a `config.yaml.example`) and
+  `/var/lib/arr_janitor`. The service ships **disabled** — configure
+  `/etc/arr_janitor/config.yaml`, then `systemctl enable --now arr_janitor`.
+
 ### Changed
 
+- Bump `sonarr` to **v0.2.1** and `radarr` to **v0.1.2**: both add a
+  configurable HTTP client timeout, so an unresponsive Sonarr/Radarr no longer
+  hangs a request indefinitely.
 - Pin the `radarr` dependency to **v0.1.1**, which lowers its Crystal requirement
   to `>= 1.20.2` — removes the `Shard "radarr" may be incompatible with Crystal
-  1.20.2` warning during builds (including the Docker image build).
+  1.20.2` warning during builds (including the Docker image build). (Superseded
+  by the v0.1.2 bump above.)
 
 ## [0.2.3] - 2026-07-20
 

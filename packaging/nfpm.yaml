@@ -1,0 +1,84 @@
+# nfpm configuration for arr_janitor — one config produces both .deb and .rpm.
+#
+# Build (VERSION must be exported; paths are relative to the repo root):
+#   crystal build -Dpreview_mt --release src/main.cr -o bin/arr_janitor
+#   VERSION=0.2.3 nfpm package --config packaging/nfpm.yaml --packager deb --target .
+#   VERSION=0.2.3 nfpm package --config packaging/nfpm.yaml --packager rpm --target .
+#
+# Runtime dependency set is derived from `ldd bin/arr_janitor`:
+#   libsqlite3.so.0  libyaml-0.so.2  libz.so.1  libssl.so.3  libcrypto.so.3
+#   libpcre2-8.so.0  (libc/libm/libgcc_s are base; libgc/libevent are static /
+#   not linked by modern Crystal, so they are not declared).
+name: arr_janitor
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+maintainer: Matthew J. Black <mjblack@gmail.com>
+description: |
+  ArrJanitor — continuously watches Sonarr/Radarr download queues, removes and
+  blocklists downloads that contain bad file extensions, and re-triggers a
+  search when the episode/movie is released.
+homepage: https://github.com/mjblack/arr_janitor
+license: MIT
+section: net
+priority: optional
+
+contents:
+  - src: bin/arr_janitor
+    dst: /usr/bin/arr_janitor
+    file_info:
+      mode: 0755
+
+  - src: packaging/arr_janitor.service
+    dst: /lib/systemd/system/arr_janitor.service
+    file_info:
+      mode: 0644
+
+  # Example config shipped as a .example so upgrades never clobber a real
+  # /etc/arr_janitor/config.yaml the operator wrote.
+  - src: config.example.yml
+    dst: /etc/arr_janitor/config.yaml.example
+    type: config
+    file_info:
+      mode: 0640
+      owner: root
+      group: arr_janitor
+
+  # Managed directories, present immediately on install.
+  - dst: /etc/arr_janitor
+    type: dir
+    file_info:
+      mode: 0750
+      owner: root
+      group: arr_janitor
+
+  - dst: /var/lib/arr_janitor
+    type: dir
+    file_info:
+      mode: 0750
+      owner: arr_janitor
+      group: arr_janitor
+
+scripts:
+  preinstall: packaging/scripts/preinstall.sh
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh
+
+overrides:
+  deb:
+    depends:
+      - libc6
+      - libsqlite3-0
+      - libyaml-0-2
+      - zlib1g
+      - libssl3 | libssl3t64
+      - libpcre2-8-0
+  rpm:
+    depends:
+      - sqlite-libs
+      - libyaml
+      - zlib
+      - openssl-libs
+      - pcre2

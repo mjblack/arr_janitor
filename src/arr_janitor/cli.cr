@@ -25,15 +25,12 @@ module ArrJanitor
     # One-line usage string, printed for `-h`/`--help` and on parse errors.
     USAGE = "usage: arr_janitor [<config.yml> | -c|--config <path>] " \
             "[-D|--database <path>] [-l|--log-level <level>] " \
-            "[-d|--daemon] [-n|--dry-run] [-h|--help]"
+            "[-d|--daemon] [-n|--dry-run] [-h|--help] [-v|--version]"
 
     # Parses *argv*, loads + validates the config, builds the backends and runs
     # the scheduler. Prints config errors to STDERR and exits non-zero.
     def self.run(argv : Array(String)) : Nil
-      if help?(argv)
-        puts USAGE
-        exit 0
-      end
+      print_info_and_exit(argv)
 
       config =
         begin
@@ -84,6 +81,21 @@ module ArrJanitor
         scheduler.run
       else
         scheduler.run_once
+      end
+    end
+
+    # Handles the informational flags that short-circuit before any config
+    # loading: `-h`/`--help` prints `USAGE` and `-v`/`--version` prints the
+    # version, each exiting `0`. A no-op when neither flag is present.
+    def self.print_info_and_exit(argv : Array(String)) : Nil
+      if help?(argv)
+        puts USAGE
+        exit 0
+      end
+
+      if version?(argv)
+        puts "arr_janitor #{ArrJanitor::VERSION}"
+        exit 0
       end
     end
 
@@ -203,6 +215,12 @@ module ArrJanitor
     # Whether *argv* requests the usage message via `--help`/`-h`.
     def self.help?(argv : Array(String)) : Bool
       argv.any? { |arg| arg == "--help" || arg == "-h" }
+    end
+
+    # Whether *argv* requests the version via `--version`/`-v`. When present the
+    # CLI prints `arr_janitor <VERSION>` and exits before any config loading.
+    def self.version?(argv : Array(String)) : Bool
+      argv.any? { |arg| arg == "--version" || arg == "-v" }
     end
 
     # Loads and validates the config at *path*. Raises `Config::Error` on a

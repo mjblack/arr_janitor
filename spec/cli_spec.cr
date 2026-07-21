@@ -283,6 +283,26 @@ describe ArrJanitor::CLI do
     end
   end
 
+  describe ".version?" do
+    it "is true when --version is present" do
+      ArrJanitor::CLI.version?(["--version"]).should be_true
+    end
+
+    it "is true when -v is present" do
+      ArrJanitor::CLI.version?(["-v"]).should be_true
+    end
+
+    it "is false when neither flag is present" do
+      ArrJanitor::CLI.version?(["config.yml"]).should be_false
+      ArrJanitor::CLI.version?([] of String).should be_false
+    end
+
+    it "does not confuse the version flags with the config path" do
+      ArrJanitor::CLI.config_path(["--version", "config.yml"]).should eq("config.yml")
+      ArrJanitor::CLI.config_path(["-v", "config.yml"]).should eq("config.yml")
+    end
+  end
+
   describe ".load_config" do
     it "loads and validates a valid config" do
       with_config(VALID_YAML) do |path|

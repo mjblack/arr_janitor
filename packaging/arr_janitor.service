@@ -1,0 +1,33 @@
+[Unit]
+Description=ArrJanitor - watches Sonarr/Radarr queues and removes bad downloads
+Documentation=https://github.com/mjblack/arr_janitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=arr_janitor
+Group=arr_janitor
+
+ExecStart=/usr/bin/arr_janitor --daemon --config /etc/arr_janitor/config.yaml --database /var/lib/arr_janitor/arr_janitor.db
+
+Restart=on-failure
+RestartSec=10
+
+# systemd manages these directories (creates them if missing, applies the mode
+# and ownership below). The package also ships them so they exist immediately.
+ConfigurationDirectory=arr_janitor
+ConfigurationDirectoryMode=0750
+StateDirectory=arr_janitor
+StateDirectoryMode=0750
+
+# Hardening. Kept deliberately moderate so the SQLite write under
+# /var/lib/arr_janitor and outbound HTTP(S) to Sonarr/Radarr keep working.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/arr_janitor
+
+[Install]
+WantedBy=multi-user.target

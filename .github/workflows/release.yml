@@ -83,6 +83,47 @@ jobs:
           fi
           echo "VERSION=${shard_version}" >> "$GITHUB_ENV"
 
+      # --- Build the release binary and native packages (.deb + .rpm) --------
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libsqlite3-dev
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: "1.20.2"
+
+      - name: Install dependencies
+        run: shards install
+
+      - name: Build release binary
+        run: crystal build -Dpreview_mt --release src/main.cr -o bin/arr_janitor
+
+      - name: Install nfpm
+        env:
+          NFPM_VERSION: "2.43.0"
+        run: |
+          set -euo pipefail
+          curl -sSLo /tmp/nfpm.deb \
+            "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_amd64.deb"
+          sudo dpkg -i /tmp/nfpm.deb
+          nfpm --version
+
+      - name: Build .deb and .rpm packages
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          nfpm package --config packaging/nfpm.yaml --packager deb --target dist/
+          nfpm package --config packaging/nfpm.yaml --packager rpm --target dist/
+          echo "Produced packages:"
+          ls -l dist/
+          # Capture the exact filenames for the release step.
+          {
+            echo "DEB_PKG=$(ls dist/*.deb)"
+            echo "RPM_PKG=$(ls dist/*.rpm)"
+          } >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -108,4 +149,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes
+          gh release create "v${VERSION}" --title "v${VERSION}" --generate-notes \
+            "${DEB_PKG}" "${RPM_PKG}"

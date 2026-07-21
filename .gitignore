@@ -9,3 +9,8 @@
 
 # built binary (crystal build at repo root)
 /arr_janitor
+
+# native packages produced by nfpm
+/dist/
+/*.deb
+/*.rpm

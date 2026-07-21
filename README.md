@@ -122,6 +122,66 @@ basename:
 `.yml`/`.yaml` files parse as YAML and `.json` files as JSON. For any other
 extension ArrJanitor tries **YAML first, then JSON** (YAML wins).
 
+## Install
+
+The easiest way to run ArrJanitor on a Linux host is a prebuilt native package.
+Every GitHub release (**v0.2.5 and later**) attaches two **amd64/x86_64**
+packages to the [Releases page](https://github.com/mjblack/arr_janitor/releases):
+
+- `arr_janitor_<version>_amd64.deb` — Debian/Ubuntu
+- `arr_janitor-<version>-1.x86_64.rpm` — Fedora/RHEL
+
+Download them from a browser or with `gh release download <tag>`, then install
+with your package manager so it resolves the runtime dependencies:
+
+```sh
+# Debian/Ubuntu (tested on Ubuntu 24.04)
+sudo apt-get install ./arr_janitor_<version>_amd64.deb
+
+# Fedora/RHEL (tested on Fedora)
+sudo dnf install ./arr_janitor-<version>-1.x86_64.rpm
+```
+
+Prefer a different route? See [Build & run](#build--run) to build from source or
+[Docker](#docker) to run the published container image.
+
+### What the package installs
+
+- the `arr_janitor` binary at `/usr/bin/arr_janitor`
+- a **systemd service** `/lib/systemd/system/arr_janitor.service` that runs, as a
+  dedicated unprivileged system user `arr_janitor`:
+  `arr_janitor --daemon --config /etc/arr_janitor/config.yaml --database /var/lib/arr_janitor/arr_janitor.db`
+- the config dir `/etc/arr_janitor/`, containing `config.yaml.example`
+- the state dir `/var/lib/arr_janitor/` (owned by the `arr_janitor` user; the
+  SQLite database lives here)
+
+### First-run setup
+
+The service ships **disabled** — you must supply a config before starting it.
+Copy the example, edit in your backends and download-client credentials (the full
+schema is documented under [Configuration](#configuration)), then enable and
+start it:
+
+```sh
+sudo cp /etc/arr_janitor/config.yaml.example /etc/arr_janitor/config.yaml
+sudo $EDITOR /etc/arr_janitor/config.yaml      # add your Sonarr/Radarr backends + download clients
+sudo systemctl enable --now arr_janitor        # start it and enable at boot
+```
+
+Useful follow-ups:
+
+```sh
+systemctl status arr_janitor                   # is it running?
+journalctl -u arr_janitor -f                   # follow logs (service logs to stderr → journald)
+```
+
+Upgrading — installing a newer package over an old one — never clobbers your
+`/etc/arr_janitor/config.yaml` (the package only ships `config.yaml.example`) nor
+the database under `/var/lib/arr_janitor/`.
+
+> The packages are **amd64/x86_64 only**. On other architectures use the
+> [Docker](#docker) image or [build from source](#build--run).
+
 ## Build & run
 
 Requires Crystal `>= 1.20.2` and `libsqlite3` (the `crystal-sqlite3` shard needs
@@ -145,6 +205,7 @@ bin/arr_janitor --config config.yml # ...or --config / -c
 | `-d`, `--daemon`      | off                | Run continuously (see [Run modes](#run-modes)) instead of a single pass. |
 | `-n`, `--dry-run`     | off                | Log intended actions without mutating anything or writing the store.  |
 | `-h`, `--help`        | —                  | Print usage and exit `0`.                                             |
+| `-v`, `--version`     | —                  | Print `arr_janitor <version>` and exit `0`.                           |
 
 Both paths **default to the current working directory** (`./config.yml` and
 `./arr_janitor.db`). The database path resolves with the precedence

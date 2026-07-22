@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-21
+
+### Documentation
+
+- README: document the native `.deb`/`.rpm` install path and the systemd
+  service (install, first-run config, `systemctl enable --now`), and add the
+  `-v`/`--version` flag to the CLI reference.
+
 ## [0.2.5] - 2026-07-21
 
 ### Added

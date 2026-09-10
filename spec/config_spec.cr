@@ -203,6 +203,123 @@ describe ArrJanitor::Config do
     end
   end
 
+  describe "cleanup helpers" do
+    it "defaults both rules to enabled with 15m / 60m timeouts when cleanup is omitted" do
+      backend = ArrJanitor::Config.from_yaml(VALID_YAML).backends.first
+      backend.metadata_downloading_enabled?.should be_true
+      backend.metadata_downloading_timeout.should eq(15.minutes)
+      backend.stalled_enabled?.should be_true
+      backend.stalled_timeout.should eq(60.minutes)
+    end
+
+    it "parses explicit cleanup values from YAML" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      metadata_downloading:\n" +
+             "        enabled: false\n" +
+             "        timeout: 10m\n" +
+             "      stalled:\n" +
+             "        enabled: true\n" +
+             "        timeout: 2h\n"
+      backend = ArrJanitor::Config.from_yaml(yaml).backends.first
+      backend.metadata_downloading_enabled?.should be_false
+      backend.metadata_downloading_timeout.should eq(10.minutes)
+      backend.stalled_enabled?.should be_true
+      backend.stalled_timeout.should eq(2.hours)
+    end
+
+    it "parses explicit cleanup values from JSON" do
+      json = <<-JSON
+        {
+          "backends": [
+            {
+              "name": "My Sonarr",
+              "type": "sonarr",
+              "url": "http://localhost:8080",
+              "api_key": "12355677757",
+              "extensions_filter": ["scr"],
+              "download_clients": [
+                { "name": "My qbittorrent", "api_key": "abc123" }
+              ],
+              "cleanup": {
+                "metadata_downloading": { "enabled": false, "timeout": "45m" },
+                "stalled": { "enabled": true, "timeout": "3h" }
+              }
+            }
+          ]
+        }
+        JSON
+      backend = ArrJanitor::Config.from_json(json).backends.first
+      backend.metadata_downloading_enabled?.should be_false
+      backend.metadata_downloading_timeout.should eq(45.minutes)
+      backend.stalled_enabled?.should be_true
+      backend.stalled_timeout.should eq(3.hours)
+    end
+
+    it "round-trips explicit cleanup values through JSON" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      metadata_downloading:\n" +
+             "        enabled: false\n" +
+             "        timeout: 10m\n" +
+             "      stalled:\n" +
+             "        enabled: true\n" +
+             "        timeout: 2h\n"
+      config = ArrJanitor::Config.from_yaml(yaml)
+      backend = ArrJanitor::Config.from_json(config.to_json).backends.first
+      backend.metadata_downloading_enabled?.should be_false
+      backend.metadata_downloading_timeout.should eq(10.minutes)
+      backend.stalled_enabled?.should be_true
+      backend.stalled_timeout.should eq(2.hours)
+    end
+
+    it "keeps the omitted rule at defaults when only one nested block is set" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      stalled:\n" +
+             "        enabled: false\n"
+      backend = ArrJanitor::Config.from_yaml(yaml).backends.first
+      backend.stalled_enabled?.should be_false
+      backend.stalled_timeout.should eq(60.minutes)
+      backend.metadata_downloading_enabled?.should be_true
+      backend.metadata_downloading_timeout.should eq(15.minutes)
+    end
+
+    it "disables only the rule with enabled: false" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      metadata_downloading:\n" +
+             "        enabled: false\n"
+      backend = ArrJanitor::Config.from_yaml(yaml).backends.first
+      backend.metadata_downloading_enabled?.should be_false
+      backend.stalled_enabled?.should be_true
+    end
+
+    it "raises Config::Error on a malformed metadata_downloading timeout" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      metadata_downloading:\n" +
+             "        timeout: soon\n"
+      backend = ArrJanitor::Config.from_yaml(yaml).backends.first
+      expect_raises(ArrJanitor::Config::Error, /invalid metadata_downloading timeout/) do
+        backend.metadata_downloading_timeout
+      end
+    end
+
+    it "raises Config::Error on a malformed stalled timeout" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      stalled:\n" +
+             "        timeout: 5x\n"
+      backend = ArrJanitor::Config.from_yaml(yaml).backends.first
+      expect_raises(ArrJanitor::Config::Error, /invalid stalled timeout/) do
+        backend.stalled_timeout
+      end
+    end
+
+    it "lets build_backend work without a cleanup argument" do
+      backend = build_backend
+      backend.metadata_downloading_enabled?.should be_true
+      backend.metadata_downloading_timeout.should eq(15.minutes)
+      backend.stalled_enabled?.should be_true
+      backend.stalled_timeout.should eq(60.minutes)
+    end
+  end
+
   describe "#validate" do
     it "returns self for a valid config" do
       config = ArrJanitor::Config.from_yaml(VALID_YAML)
@@ -278,6 +395,36 @@ describe ArrJanitor::Config do
       errors.any?(&.includes?("log_level")).should be_true
       errors.any?(&.includes?("bogus")).should be_true
       errors.any?(&.includes?("trace, debug, info, notice, warn, error, fatal, none")).should be_true
+    end
+
+    it "accepts existing configs that omit cleanup" do
+      config = ArrJanitor::Config.from_yaml(VALID_YAML)
+      config.validation_errors.should be_empty
+    end
+
+    it "accepts a valid cleanup block" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      stalled:\n" +
+             "        timeout: 90m\n"
+      ArrJanitor::Config.from_yaml(yaml).validation_errors.should be_empty
+    end
+
+    it "fails on a malformed metadata_downloading timeout, naming the backend and the rule" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      metadata_downloading:\n" +
+             "        timeout: soon\n"
+      errors = ArrJanitor::Config.from_yaml(yaml).validation_errors
+      errors.any?(&.includes?("My Sonarr")).should be_true
+      errors.any?(&.includes?("metadata_downloading")).should be_true
+    end
+
+    it "fails on a malformed stalled timeout, naming the backend and the rule" do
+      yaml = "#{VALID_YAML.chomp}\n    cleanup:\n" +
+             "      stalled:\n" +
+             "        timeout: nope\n"
+      errors = ArrJanitor::Config.from_yaml(yaml).validation_errors
+      errors.any?(&.includes?("My Sonarr")).should be_true
+      errors.any?(&.includes?("stalled")).should be_true
     end
   end
 end

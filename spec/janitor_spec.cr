@@ -102,6 +102,13 @@ private def meta_snapshot(hash = "HASH", *, added_on : Time? = Time.utc - 16.min
     hash: hash, state: "metaDL", num_seeds: 0, added_on: added_on)
 end
 
+# A `TorrentSnapshot` in a downloading-family state with the given seed count.
+# Defaults to `stalledDL` + 0 seeds (the stalled-cleanup happy path).
+private def stalled_snapshot(hash = "HASH", *, state = "stalledDL", num_seeds = 0)
+  ArrJanitor::DownloadClient::TorrentSnapshot.new(
+    hash: hash, state: state, num_seeds: num_seeds)
+end
+
 # A `DownloadClientInfo` describing a qBittorrent client named "qbit".
 private def qbit_info : ArrJanitor::DownloadClientInfo
   ArrJanitor::DownloadClientInfo.new(
@@ -634,6 +641,317 @@ describe ArrJanitor::Janitor do
         backend.deleted.should be_empty
         client.files_for_called?.should be_true
         store.first_seen_metadata(backend.name, "HASH").should be_nil
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
+
+  describe "stalled zero-seed cleanup" do
+    it "does not delete a stalled zero-seed torrent on first scan and records first-seen" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Zero.Seeds", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        backend.searched.should be_empty
+        client.files_for_called?.should be_true
+        store.first_seen_stalled(backend.name, "HASH").should_not be_nil
+        store.processed?(backend.name, "HASH").should be_false
+        events.any? { |event|
+          event.severity.debug? && event.message.includes?("stalled") &&
+            event.message.includes?("0 seeds")
+        }.should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "deletes, blocklists and re-searches a stalled torrent whose first-seen is older than the timeout when released" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Aged.Stall", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        backend.released = true
+        store.mark_stalled(backend.name, "HASH", Time.utc - 61.minutes)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should eq([item])
+        backend.searched.should eq([item])
+        client.files_for_called?.should be_true
+        recorded_action(path, backend.name, "HASH").should eq("removed_blocklisted_stalled")
+        events.any? { |event|
+          event.severity.warn? && event.message.includes?("stalled") &&
+            event.message.includes?("0 seeds")
+        }.should be_true
+        events.any?(&.message.includes?("search re-triggered")).should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "deletes and blocklists but does not search a timed-out stalled torrent that is not released" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Aged.Stall", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        backend.released = false
+        store.mark_stalled(backend.name, "HASH", Time.utc - 61.minutes)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should eq([item])
+        backend.searched.should be_empty
+        recorded_action(path, backend.name, "HASH").should eq("removed_blocklisted_stalled")
+        events.any?(&.message.includes?("not released yet")).should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "does not delete a stalled torrent whose first-seen is younger than the timeout" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Fresh.Stall", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        store.mark_stalled(backend.name, "HASH", Time.utc - 30.minutes)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        store.processed?(backend.name, "HASH").should be_false
+        store.first_seen_stalled(backend.name, "HASH").should_not be_nil
+        events.any? { |event|
+          event.severity.debug? && event.message.includes?("waiting")
+        }.should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "clears a leftover stalled clock when the torrent has seeds again" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Recovered.Seeds", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        store.mark_stalled(backend.name, "HASH", Time.utc - 61.minutes)
+        client = FakeDownloadClient.new(["show.mkv"],
+          snapshot: stalled_snapshot(state: "downloading", num_seeds: 1))
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        store.first_seen_stalled(backend.name, "HASH").should be_nil
+        store.processed?(backend.name, "HASH").should be_false
+        events.any? { |event|
+          event.severity.debug? && event.message.includes?("clean download")
+        }.should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "does not use the stalled path for a metaDL torrent with zero seeds" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Still.MetaDL", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        backend.released = true
+        store.mark_stalled(backend.name, "HASH", Time.utc - 61.minutes)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: meta_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should eq([item])
+        client.files_for_called?.should be_false
+        recorded_action(path, backend.name, "HASH").should eq("removed_blocklisted_metadata")
+        events.any? { |event|
+          event.severity.warn? && event.message.includes?("stuck downloading metadata")
+        }.should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "starts the stalled clock now when a torrent leaves metaDL into 0-seed downloading" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Left.MetaDL.ZeroSeeds", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        store.mark_metadata(backend.name, "HASH", Time.utc - 2.hours)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+        run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        store.first_seen_metadata(backend.name, "HASH").should be_nil
+        seen = store.first_seen_stalled(backend.name, "HASH")
+        seen.should be_a(Time)
+        (Time.utc - seen.as(Time)).should be < 5.seconds
+        store.processed?(backend.name, "HASH").should be_false
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "does not treat queuedDL, uploading, or stoppedDL with zero seeds as stalled" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        %w[queuedDL uploading stoppedDL].each do |state|
+          item = queue_item(id: 1, download_id: "HASH-#{state}", download_client: "qbit",
+            title: "Not.Stalled.#{state}", episode_id: 5)
+          backend = StubBackend.new(build_config, [item], qbit_info)
+          client = FakeDownloadClient.new(["show.mkv"],
+            snapshot: stalled_snapshot("HASH-#{state}", state: state, num_seeds: 0))
+
+          run_janitor(backend, client, store)
+
+          backend.deleted.should be_empty
+          store.first_seen_stalled(backend.name, "HASH-#{state}").should be_nil
+        end
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "still deletes via the extension path when a 0-seed torrent is under the stalled timeout" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Bad.And.Stalled", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        store.mark_stalled(backend.name, "HASH", Time.utc - 5.minutes)
+        client = FakeDownloadClient.new(["virus.exe"], snapshot: stalled_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should eq([item])
+        client.files_for_called?.should be_true
+        recorded_action(path, backend.name, "HASH").should eq("removed_blocklisted")
+        events.any? { |event|
+          event.severity.warn? && event.message.includes?("virus.exe")
+        }.should be_true
+        events.any?(&.message.includes?("removed_blocklisted_stalled")).should be_false
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "does not act on stalled when the cleanup rule is disabled and clears a stale clock" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        cleanup = ArrJanitor::Config::Cleanup.new(
+          stalled: ArrJanitor::Config::CleanupRule.new(enabled: false))
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Disabled.Stall", episode_id: 5)
+        backend = StubBackend.new(build_config(cleanup: cleanup), [item], qbit_info)
+        backend.released = true
+        store.mark_stalled(backend.name, "HASH", Time.utc - 61.minutes)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        store.first_seen_stalled(backend.name, "HASH").should be_nil
+        recorded_action(path, backend.name, "HASH").should be_nil
+        events.any? { |event|
+          event.message.includes?("stalled") && event.message.includes?("0 seeds")
+        }.should be_false
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "does not delete a stalled torrent when there is no store" do
+      item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+        title: "No.Store.Stall", episode_id: 5)
+      backend = StubBackend.new(build_config, [item], qbit_info)
+      backend.released = true
+      client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+      events = run_janitor(backend, client)
+
+      backend.deleted.should be_empty
+      backend.searched.should be_empty
+      events.any? { |event|
+        event.severity.debug? && event.message.includes?("database")
+      }.should be_true
+    end
+
+    it "logs a dry-run would-delete for a timed-out stalled torrent without mutating" do
+      dir = File.tempname("arr_janitor_janitor_stalled")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Aged.Stall", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        backend.released = true
+        store.mark_stalled(backend.name, "HASH", Time.utc - 61.minutes)
+        client = FakeDownloadClient.new(["show.mkv"], snapshot: stalled_snapshot)
+
+        events = run_janitor(backend, client, store, dry_run: true)
+
+        backend.deleted.should be_empty
+        backend.searched.should be_empty
+        store.processed?(backend.name, "HASH").should be_false
+        store.first_seen_stalled(backend.name, "HASH").should_not be_nil
+        events.any? { |event|
+          event.message.includes?("[DRY RUN] would delete + blocklist") &&
+            event.message.includes?("stalled, 0 seeds")
+        }.should be_true
+        events.any?(&.message.includes?("[DRY RUN] would re-trigger search")).should be_true
       ensure
         store.close
         FileUtils.rm_rf(dir)

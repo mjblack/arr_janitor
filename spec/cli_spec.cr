@@ -34,6 +34,11 @@ private class FakeDownloadClient < ArrJanitor::DownloadClient
   def files_for(hash : String) : Array(String)
     @files
   end
+
+  def info_for(hash : String) : ArrJanitor::DownloadClient::TorrentSnapshot
+    ArrJanitor::DownloadClient::TorrentSnapshot.new(
+      hash: hash, state: "downloading", num_seeds: 1)
+  end
 end
 
 # A minimal `Backend` with a single canned queue item and download-client info,

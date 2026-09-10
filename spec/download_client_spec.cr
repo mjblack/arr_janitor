@@ -7,6 +7,20 @@ private def torrent_file(name : String?) : QBittorrent::Model::TorrentFile
   QBittorrent::Model::TorrentFile.from_json(json)
 end
 
+# Builds a `TorrentInfo` from JSON (the model has no public constructor).
+private def torrent_info(json : String) : QBittorrent::Model::TorrentInfo
+  QBittorrent::Model::TorrentInfo.from_json(json)
+end
+
+# Convenience constructor for `TorrentSnapshot` predicate specs.
+private def snapshot(state : String?, num_seeds : Int32? = 0)
+  ArrJanitor::DownloadClient::TorrentSnapshot.new(
+    hash: "abc",
+    state: state,
+    num_seeds: num_seeds,
+  )
+end
+
 describe ArrJanitor::DownloadClient do
   describe ".build" do
     it "builds a qBittorrent client (case-insensitive)" do
@@ -92,6 +106,102 @@ describe ArrJanitor::DownloadClient do
         error.should_not be_a(ArrJanitor::DownloadClient::TorrentNotFound)
         error.cause.should eq(api_error)
       end
+    end
+
+    describe ".snapshot_from" do
+      it "maps state, num_seeds, and added_on off a JSON TorrentInfo" do
+        info = torrent_info(<<-JSON)
+          {
+            "hash": "8c212779b4abde7c6bc608063a0d008b7e40ce32",
+            "state": "metaDL",
+            "num_seeds": 0,
+            "added_on": 1700000000
+          }
+          JSON
+
+        snapshot = ArrJanitor::DownloadClient::QBittorrent.snapshot_from(info)
+        snapshot.hash.should eq("8c212779b4abde7c6bc608063a0d008b7e40ce32")
+        # Wire token via TorrentState#to_api — not the enum name "MetaDL".
+        snapshot.state.should eq("metaDL")
+        snapshot.num_seeds.should eq(0)
+        snapshot.added_on.should eq(Time.unix(1_700_000_000))
+        snapshot.added_on.try(&.utc?).should be_true
+      end
+
+      it "maps a missing added_on to nil" do
+        info = torrent_info(%({"hash": "abc", "state": "downloading", "num_seeds": 1}))
+        snapshot = ArrJanitor::DownloadClient::QBittorrent.snapshot_from(info)
+        snapshot.added_on.should be_nil
+        snapshot.state.should eq("downloading")
+        snapshot.num_seeds.should eq(1)
+      end
+
+      it "maps a missing state to nil" do
+        info = torrent_info(%({"hash": "abc", "num_seeds": 0}))
+        snapshot = ArrJanitor::DownloadClient::QBittorrent.snapshot_from(info)
+        snapshot.state.should be_nil
+        snapshot.num_seeds.should eq(0)
+      end
+    end
+
+    describe ".snapshot_from_list" do
+      it "maps the first TorrentInfo into a snapshot" do
+        info = torrent_info(%({"hash": "abc", "state": "stalledDL", "num_seeds": 0}))
+        snapshot = ArrJanitor::DownloadClient::QBittorrent.snapshot_from_list(
+          "abc", [info])
+        snapshot.hash.should eq("abc")
+        snapshot.state.should eq("stalledDL")
+        snapshot.num_seeds.should eq(0)
+      end
+
+      it "raises TorrentNotFound for an empty info list" do
+        empty = [] of QBittorrent::Model::TorrentInfo
+        expect_raises(ArrJanitor::DownloadClient::TorrentNotFound, /MISSING/) do
+          ArrJanitor::DownloadClient::QBittorrent.snapshot_from_list("MISSING", empty)
+        end
+      end
+    end
+  end
+end
+
+describe ArrJanitor::DownloadClient::TorrentSnapshot do
+  describe "#metadata_downloading?" do
+    it "is true only for the metaDL wire token" do
+      snapshot("metaDL").metadata_downloading?.should be_true
+    end
+
+    it "is false for other states, including case variants" do
+      snapshot("downloading").metadata_downloading?.should be_false
+      snapshot("stalledDL").metadata_downloading?.should be_false
+      snapshot("MetaDL").metadata_downloading?.should be_false
+      snapshot(nil).metadata_downloading?.should be_false
+    end
+  end
+
+  describe "#stalled_zero_seeds?" do
+    it "is true for stalledDL/downloading/forcedDL with zero seeds" do
+      snapshot("stalledDL", 0).stalled_zero_seeds?.should be_true
+      snapshot("downloading", 0).stalled_zero_seeds?.should be_true
+      snapshot("forcedDL", 0).stalled_zero_seeds?.should be_true
+    end
+
+    it "is false for metaDL, uploading, queuedDL, stoppedDL with zero seeds" do
+      snapshot("metaDL", 0).stalled_zero_seeds?.should be_false
+      snapshot("uploading", 0).stalled_zero_seeds?.should be_false
+      snapshot("queuedDL", 0).stalled_zero_seeds?.should be_false
+      snapshot("stoppedDL", 0).stalled_zero_seeds?.should be_false
+      snapshot("pausedDL", 0).stalled_zero_seeds?.should be_false
+    end
+
+    it "is false when num_seeds is greater than zero" do
+      snapshot("stalledDL", 1).stalled_zero_seeds?.should be_false
+      snapshot("downloading", 5).stalled_zero_seeds?.should be_false
+      snapshot("forcedDL", 1).stalled_zero_seeds?.should be_false
+    end
+
+    it "is false when num_seeds or state is nil" do
+      snapshot("stalledDL", nil).stalled_zero_seeds?.should be_false
+      snapshot(nil, 0).stalled_zero_seeds?.should be_false
     end
   end
 end

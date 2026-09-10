@@ -128,14 +128,14 @@ module ArrJanitor
     # `PRAGMA table_info` so migrate can decide whether to ALTER.
     private def download_states_has_column?(name : String) : Bool
       columns = [] of String
-      @db.query("PRAGMA table_info(download_states)") do |rs|
-        rs.each do
-          rs.read(Int32) # cid
-          columns << rs.read(String)
-          rs.read(String)  # type
-          rs.read(Int32)   # notnull
-          rs.read(String?) # dflt_value
-          rs.read(Int32)   # pk
+      @db.query("PRAGMA table_info(download_states)") do |result_set|
+        result_set.each do
+          result_set.read(Int32) # cid
+          columns << result_set.read(String)
+          result_set.read(String)  # type
+          result_set.read(Int32)   # notnull
+          result_set.read(String?) # dflt_value
+          result_set.read(Int32)   # pk
         end
       end
       columns.includes?(name)

@@ -252,8 +252,8 @@ describe ArrJanitor::Store do
         timestamp = t0.to_utc.to_rfc3339
 
         # Pre-existing DB with the old schema (no first_seen_metadata column).
-        DB.open("sqlite3://#{path}") do |db|
-          db.exec <<-SQL
+        DB.open("sqlite3://#{path}") do |database|
+          database.exec <<-SQL
             CREATE TABLE download_states (
               backend TEXT NOT NULL,
               download_id TEXT NOT NULL,
@@ -262,7 +262,7 @@ describe ArrJanitor::Store do
               PRIMARY KEY (backend, download_id)
             )
             SQL
-          db.exec(
+          database.exec(
             "INSERT INTO download_states (backend, download_id, first_seen_stalled, updated_at) " \
             "VALUES (?, ?, ?, ?)",
             "sonarr", "HASH", timestamp, timestamp)

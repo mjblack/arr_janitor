@@ -64,14 +64,16 @@ module ArrJanitor
       return unless files
 
       bad = files.select { |path| backend.config.matches_bad_extension?(path) }
-      if bad.empty?
-        reporter.debug(source, "clean download #{item.title.inspect}")
+      unless bad.empty?
+        reporter.warn(source, "bad extension(s) in '#{item.title}': #{bad.join(", ")}")
+        act_or_dry_run(backend, item, reporter, source, hash, bad, "removed_blocklisted",
+          "bad: #{bad.join(", ")}")
         return
       end
 
-      reporter.warn(source, "bad extension(s) in '#{item.title}': #{bad.join(", ")}")
-      act_or_dry_run(backend, item, reporter, source, hash, bad, "removed_blocklisted",
-        "bad: #{bad.join(", ")}")
+      return if consider_stalled(backend, item, reporter, source, hash, snapshot)
+
+      reporter.debug(source, "clean download #{item.title.inspect}")
     end
 
     # Resolves the download client named *name*, logging and returning `nil`
@@ -159,6 +161,70 @@ module ArrJanitor
         end
       end
       false
+    end
+
+    # Stalled zero-seed cleanup. Called after the bad-extension matcher, so a
+    # bad file still wins even on a 0-seed torrent. Returns `true` when the
+    # item is fully handled (acted on, still waiting out the timeout, or
+    # skipped because there is no store) so the "clean download" log is
+    # skipped. A torrent that is no longer stalled — or whose stalled rule is
+    # disabled — has its leftover first-seen clock cleared, then falls
+    # through (`false`).
+    private def consider_stalled(backend : Backend, item : QueueItem,
+                                 reporter : Reporter, source : String,
+                                 hash : String,
+                                 snapshot : DownloadClient::TorrentSnapshot) : Bool
+      if backend.config.stalled_enabled? && snapshot.stalled_zero_seeds?
+        timeout = backend.config.stalled_timeout
+        elapsed = stalled_elapsed(backend.name, hash)
+
+        if (waited = elapsed) && waited >= timeout
+          reporter.warn(source,
+            "'#{item.title}' stalled with 0 seeds for #{format_duration(waited)} (timeout #{format_duration(timeout)})")
+          act_or_dry_run(backend, item, reporter, source, hash, [] of String,
+            "removed_blocklisted_stalled", "stalled, 0 seeds")
+          return true
+        end
+
+        store = @store
+        if store.nil?
+          reporter.debug(source,
+            "'#{item.title}' stalled with 0 seeds; stalled tracking needs a database")
+          return true
+        end
+
+        unless @dry_run
+          store.mark_stalled(backend.name, hash)
+        end
+        waited_text = elapsed ? " for #{format_duration(elapsed)}" : ""
+        reporter.debug(source,
+          "'#{item.title}' stalled with 0 seeds#{waited_text} (timeout #{format_duration(timeout)}); waiting")
+        return true
+      end
+
+      clear_stalled_clock(backend.name, hash)
+      false
+    end
+
+    # Elapsed time stalled: `now - store.first_seen_stalled`. Unlike metadata,
+    # this never uses `added_on` — seeds can drop after a healthy start.
+    # `nil` means we have no clock yet (no store, or first sight).
+    private def stalled_elapsed(backend_name : String, hash : String) : Time::Span?
+      if first_seen = @store.try &.first_seen_stalled(backend_name, hash)
+        Time.utc - first_seen
+      else
+        nil
+      end
+    end
+
+    # Drops a leftover first-seen-stalled clock. No-op in dry-run (no store
+    # writes) and when there is no store or no clock.
+    private def clear_stalled_clock(backend_name : String, hash : String) : Nil
+      return if @dry_run
+
+      if (store = @store) && store.first_seen_stalled(backend_name, hash)
+        store.clear_stalled(backend_name, hash)
+      end
     end
 
     # Elapsed time in metadata-download: prefer `added_on`, else the store's

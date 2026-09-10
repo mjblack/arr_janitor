@@ -8,8 +8,10 @@ module ArrJanitor
   #
   # * `processed_downloads` — an audit log of every download ArrJanitor has
   #   acted on (for retention/reporting), swept on a TTL.
-  # * `download_states` — per-download stalled bookkeeping (groundwork for the
-  #   stalled-download handling in #9): when a download was *first* seen stalled.
+  # * `download_states` — independent first-seen clocks per download: when it
+  #   was first seen stuck fetching metadata (`first_seen_metadata`) and when
+  #   it was first seen stalled (`first_seen_stalled`). A row may have only
+  #   one of the two timestamps set.
   #
   # A single `Store` (and its underlying `DB::Database` connection pool) is
   # meant to be shared across all backend fibers. Under `-Dpreview_mt` several
@@ -108,9 +110,35 @@ module ArrJanitor
           download_id TEXT NOT NULL,
           first_seen_stalled TEXT,
           updated_at TEXT NOT NULL,
+          first_seen_metadata TEXT,
           PRIMARY KEY (backend, download_id)
         )
         SQL
+
+      # CREATE TABLE IF NOT EXISTS will not add a column to an already-created
+      # table. Existing databases (pre-#31) have download_states without
+      # first_seen_metadata; ALTER only when the column is missing so a
+      # second open does not fail with "duplicate column".
+      unless download_states_has_column?("first_seen_metadata")
+        @db.exec "ALTER TABLE download_states ADD COLUMN first_seen_metadata TEXT"
+      end
+    end
+
+    # Whether `download_states` currently has a column named `name`. Uses
+    # `PRAGMA table_info` so migrate can decide whether to ALTER.
+    private def download_states_has_column?(name : String) : Bool
+      columns = [] of String
+      @db.query("PRAGMA table_info(download_states)") do |rs|
+        rs.each do
+          rs.read(Int32) # cid
+          columns << rs.read(String)
+          rs.read(String)  # type
+          rs.read(Int32)   # notnull
+          rs.read(String?) # dflt_value
+          rs.read(Int32)   # pk
+        end
+      end
+      columns.includes?(name)
     end
 
     # Records that ArrJanitor took `action` on the download identified by
@@ -149,12 +177,17 @@ module ArrJanitor
     # Marks (`backend`, `download_id`) as stalled, recording `now` as the
     # first-seen-stalled time the *first* time it is called. Subsequent calls
     # leave the original first-seen time untouched (only `updated_at` moves).
+    # Does not clobber `first_seen_metadata`. If the row already exists from a
+    # metadata mark (stalled timestamp NULL), this sets stalled without moving
+    # an existing stalled time.
     def mark_stalled(backend : String, download_id : String, now = Time.utc) : Nil
       timestamp = now.to_utc.to_rfc3339
       @db.exec(
         "INSERT INTO download_states (backend, download_id, first_seen_stalled, updated_at) " \
         "VALUES (?, ?, ?, ?) " \
-        "ON CONFLICT (backend, download_id) DO UPDATE SET updated_at = excluded.updated_at",
+        "ON CONFLICT (backend, download_id) DO UPDATE SET " \
+        "first_seen_stalled = COALESCE(download_states.first_seen_stalled, excluded.first_seen_stalled), " \
+        "updated_at = excluded.updated_at",
         backend, download_id, timestamp, timestamp)
     end
 
@@ -168,7 +201,50 @@ module ArrJanitor
       Time.parse_rfc3339(raw).to_utc
     end
 
-    # Clears any stored stalled state for (`backend`, `download_id`).
+    # Marks (`backend`, `download_id`) as stuck fetching metadata, recording
+    # `now` as the first-seen-metadata time the *first* time it is called.
+    # Subsequent calls leave the original first-seen time untouched (only
+    # `updated_at` moves). Does not clobber `first_seen_stalled`. If the row
+    # already exists from a stalled mark (metadata timestamp NULL), this sets
+    # metadata without moving an existing metadata time.
+    def mark_metadata(backend : String, download_id : String, now = Time.utc) : Nil
+      timestamp = now.to_utc.to_rfc3339
+      @db.exec(
+        "INSERT INTO download_states (backend, download_id, first_seen_metadata, updated_at) " \
+        "VALUES (?, ?, ?, ?) " \
+        "ON CONFLICT (backend, download_id) DO UPDATE SET " \
+        "first_seen_metadata = COALESCE(download_states.first_seen_metadata, excluded.first_seen_metadata), " \
+        "updated_at = excluded.updated_at",
+        backend, download_id, timestamp, timestamp)
+    end
+
+    # The time (`backend`, `download_id`) was first seen stuck fetching
+    # metadata, or `nil` when it has no recorded metadata state.
+    def first_seen_metadata(backend : String, download_id : String) : Time?
+      raw = @db.query_one?(
+        "SELECT first_seen_metadata FROM download_states WHERE backend = ? AND download_id = ?",
+        backend, download_id, as: String?)
+      return nil if raw.nil?
+      Time.parse_rfc3339(raw).to_utc
+    end
+
+    # Nulls out `first_seen_metadata` only; leaves `first_seen_stalled` (and
+    # the row) intact.
+    def clear_metadata(backend : String, download_id : String) : Nil
+      @db.exec(
+        "UPDATE download_states SET first_seen_metadata = NULL WHERE backend = ? AND download_id = ?",
+        backend, download_id)
+    end
+
+    # Nulls out `first_seen_stalled` only; leaves `first_seen_metadata` (and
+    # the row) intact.
+    def clear_stalled(backend : String, download_id : String) : Nil
+      @db.exec(
+        "UPDATE download_states SET first_seen_stalled = NULL WHERE backend = ? AND download_id = ?",
+        backend, download_id)
+    end
+
+    # Clears any stored state for (`backend`, `download_id`) — both clocks.
     def clear_state(backend : String, download_id : String) : Nil
       @db.exec("DELETE FROM download_states WHERE backend = ? AND download_id = ?",
         backend, download_id)

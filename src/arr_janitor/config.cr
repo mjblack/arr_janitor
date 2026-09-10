@@ -45,6 +45,34 @@ module ArrJanitor
       end
     end
 
+    # One cleanup kind (`metadata_downloading` or `stalled`). Both fields are
+    # optional; omitted values fall back to the defaults on `Backend`.
+    class CleanupRule
+      include YAML::Serializable
+      include JSON::Serializable
+
+      property? enabled : Bool = true
+      property timeout : String?
+
+      def initialize(@enabled : Bool = true, @timeout : String? = nil)
+      end
+    end
+
+    # Per-backend cleanup of torrents stuck downloading metadata or stalled
+    # with zero seeds. Omitting the block, or either nested rule, applies
+    # defaults (both enabled; 15m / 60m).
+    class Cleanup
+      include YAML::Serializable
+      include JSON::Serializable
+
+      property metadata_downloading : CleanupRule?
+      property stalled : CleanupRule?
+
+      def initialize(@metadata_downloading : CleanupRule? = nil,
+                     @stalled : CleanupRule? = nil)
+      end
+    end
+
     # A single Sonarr/Radarr instance to watch.
     class Backend
       include YAML::Serializable
@@ -52,6 +80,12 @@ module ArrJanitor
 
       # Interval when none is configured.
       DEFAULT_INTERVAL = 20.minutes
+
+      # Timeout when `cleanup.metadata_downloading.timeout` is omitted.
+      DEFAULT_METADATA_DOWNLOADING_TIMEOUT = 15.minutes
+
+      # Timeout when `cleanup.stalled.timeout` is omitted.
+      DEFAULT_STALLED_TIMEOUT = 60.minutes
 
       # `<int>` followed by a `m`/`h`/`d` unit.
       INTERVAL_PATTERN = /\A(\d+)([mhd])\z/
@@ -76,10 +110,14 @@ module ArrJanitor
       @[JSON::Field(key: "download_clients")]
       property download_clients : Array(DownloadClient) = [] of DownloadClient
 
+      # Optional cleanup rules. `nil` means both kinds use their defaults.
+      property cleanup : Cleanup?
+
       def initialize(@name : String, @type : BackendType?, @url : String,
                      @api_key : String, @interval : String? = nil,
                      @extensions_filter : Array(String) = [] of String,
-                     @download_clients : Array(DownloadClient) = [] of DownloadClient)
+                     @download_clients : Array(DownloadClient) = [] of DownloadClient,
+                     @cleanup : Cleanup? = nil)
       end
 
       # The poll interval as a `Time::Span`. Defaults to `DEFAULT_INTERVAL`
@@ -116,6 +154,60 @@ module ArrJanitor
             ext = entry.lchop('.').downcase
             basename.ends_with?(".#{ext}")
           end
+        end
+      end
+
+      # Whether metadata-downloading cleanup is on. Defaults to `true` when
+      # `cleanup` or the nested rule is omitted.
+      def metadata_downloading_enabled? : Bool
+        if rule = cleanup.try(&.metadata_downloading)
+          rule.enabled?
+        else
+          true
+        end
+      end
+
+      # How long a torrent may sit in metadata-downloading before cleanup.
+      # Defaults to `DEFAULT_METADATA_DOWNLOADING_TIMEOUT`; raises
+      # `Config::Error` on a malformed value.
+      def metadata_downloading_timeout : Time::Span
+        raw = cleanup.try(&.metadata_downloading).try(&.timeout)
+        return DEFAULT_METADATA_DOWNLOADING_TIMEOUT if raw.nil?
+
+        parse_timeout(raw, "metadata_downloading")
+      end
+
+      # Whether stalled-torrent cleanup is on. Defaults to `true` when
+      # `cleanup` or the nested rule is omitted.
+      def stalled_enabled? : Bool
+        if rule = cleanup.try(&.stalled)
+          rule.enabled?
+        else
+          true
+        end
+      end
+
+      # How long a torrent may sit stalled (zero seeds) before cleanup.
+      # Defaults to `DEFAULT_STALLED_TIMEOUT`; raises `Config::Error` on a
+      # malformed value.
+      def stalled_timeout : Time::Span
+        raw = cleanup.try(&.stalled).try(&.timeout)
+        return DEFAULT_STALLED_TIMEOUT if raw.nil?
+
+        parse_timeout(raw, "stalled")
+      end
+
+      private def parse_timeout(raw : String, rule : String) : Time::Span
+        if md = INTERVAL_PATTERN.match(raw)
+          amount = md[1].to_i
+          case md[2]
+          when "m" then amount.minutes
+          when "h" then amount.hours
+          when "d" then amount.days
+          else          raise Error.new("invalid #{rule} timeout unit: #{raw.inspect}")
+          end
+        else
+          raise Error.new("invalid #{rule} timeout: #{raw.inspect} (expected <int>[m|h|d])")
         end
       end
 
@@ -267,6 +359,19 @@ module ArrJanitor
 
       backend.download_clients.each_with_index do |client, j|
         validate_client(client, label, j, errors)
+      end
+
+      if cleanup = backend.cleanup
+        validate_cleanup_rule(cleanup.metadata_downloading, label, "metadata_downloading", errors)
+        validate_cleanup_rule(cleanup.stalled, label, "stalled", errors)
+      end
+    end
+
+    private def validate_cleanup_rule(rule : CleanupRule?, label : String, name : String, errors : Array(String)) : Nil
+      return unless rule
+
+      if (raw = rule.timeout) && !raw.matches?(Backend::INTERVAL_PATTERN)
+        errors << "#{label}: cleanup.#{name} timeout #{raw.inspect} is invalid (expected <int>[m|h|d])"
       end
     end
 

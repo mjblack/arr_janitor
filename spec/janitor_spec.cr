@@ -1,20 +1,38 @@
 require "./spec_helper"
+require "db"
+require "sqlite3"
 
-# A fake download client returning canned file paths (or raising) — no network.
+# A fake download client returning canned file paths / snapshots (or raising) —
+# no network. Default snapshot is a healthy downloading torrent with seeds so
+# existing extension-matcher specs keep taking the files_for path.
 private class FakeDownloadClient < ArrJanitor::DownloadClient
-  def initialize(@files : Array(String), @error : Exception? = nil)
+  getter? files_for_called = false
+
+  def initialize(@files : Array(String), @error : Exception? = nil,
+                 @snapshot : ArrJanitor::DownloadClient::TorrentSnapshot? = nil,
+                 @info_error : Exception? = nil,
+                 @failing_hash : String? = nil)
   end
 
   def files_for(hash : String) : Array(String)
-    if err = @error
+    @files_for_called = true
+    if (err = @error) && hash_fails?(hash)
       raise err
     end
     @files
   end
 
   def info_for(hash : String) : ArrJanitor::DownloadClient::TorrentSnapshot
-    ArrJanitor::DownloadClient::TorrentSnapshot.new(
+    if (err = @info_error) && hash_fails?(hash)
+      raise err
+    end
+    @snapshot || ArrJanitor::DownloadClient::TorrentSnapshot.new(
       hash: hash, state: "downloading", num_seeds: 1)
+  end
+
+  private def hash_fails?(hash : String) : Bool
+    failing = @failing_hash
+    failing.nil? || hash == failing
   end
 end
 
@@ -65,14 +83,23 @@ end
 # and bad-extension filter used throughout these specs.
 private def build_config(clients = [ArrJanitor::Config::DownloadClient.new(
                            name: "qbit", username: "admin", password: "secret")],
-                         extensions = ["exe", "scr"]) : ArrJanitor::Config::Backend
+                         extensions = ["exe", "scr"],
+                         cleanup : ArrJanitor::Config::Cleanup? = nil) : ArrJanitor::Config::Backend
   ArrJanitor::Config::Backend.new(
     name: "Test Sonarr",
     type: ArrJanitor::Config::BackendType::Sonarr,
     url: "http://localhost:8989",
     api_key: "key",
     extensions_filter: extensions,
-    download_clients: clients)
+    download_clients: clients,
+    cleanup: cleanup)
+end
+
+# A `TorrentSnapshot` in qBittorrent `metaDL`. Default `added_on` is older than
+# the 15m metadata-downloading timeout so over-timeout examples stay concise.
+private def meta_snapshot(hash = "HASH", *, added_on : Time? = Time.utc - 16.minutes)
+  ArrJanitor::DownloadClient::TorrentSnapshot.new(
+    hash: hash, state: "metaDL", num_seeds: 0, added_on: added_on)
 end
 
 # A `DownloadClientInfo` describing a qBittorrent client named "qbit".
@@ -89,11 +116,23 @@ end
 # Runs the janitor against *backend* with a resolver that always returns
 # *client*, capturing every emitted `LogEvent`.
 private def run_janitor(backend : ArrJanitor::Backend,
-                        client : ArrJanitor::DownloadClient?) : Array(ArrJanitor::LogEvent)
+                        client : ArrJanitor::DownloadClient?,
+                        store : ArrJanitor::Store? = nil,
+                        dry_run : Bool = false) : Array(ArrJanitor::LogEvent)
   resolver = ArrJanitor::DownloadClientResolver.new do |_impl, _url, _key, _user, _pass|
     client
   end
-  capture(backend, ArrJanitor::Janitor.new(resolver))
+  capture(backend, ArrJanitor::Janitor.new(resolver, store, dry_run: dry_run))
+end
+
+# The most recent `processed_downloads.action` for (`backend`, `download_id`),
+# or `nil` when nothing has been recorded.
+private def recorded_action(path : String, backend : String, download_id : String) : String?
+  DB.open("sqlite3://#{path}") do |database|
+    database.query_one?(
+      "SELECT action FROM processed_downloads WHERE backend = ? AND download_id = ? ORDER BY id DESC LIMIT 1",
+      backend, download_id, as: String)
+  end
 end
 
 # Drains all events a janitor emits while processing *backend*.
@@ -373,6 +412,234 @@ describe ArrJanitor::Janitor do
       end
     end
   end
+
+  describe "metadata-downloading cleanup" do
+    it "deletes, blocklists and re-searches a metaDL torrent older than the timeout when released" do
+      dir = File.tempname("arr_janitor_janitor_meta")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Stuck.Magnet", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        backend.released = true
+        client = FakeDownloadClient.new(["virus.exe"], snapshot: meta_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should eq([item])
+        backend.searched.should eq([item])
+        client.files_for_called?.should be_false
+        recorded_action(path, backend.name, "HASH").should eq("removed_blocklisted_metadata")
+        events.any? { |event|
+          event.severity.warn? && event.message.includes?("stuck downloading metadata")
+        }.should be_true
+        events.any?(&.message.includes?("search re-triggered")).should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "deletes and blocklists but does not search a timed-out metaDL torrent that is not released" do
+      item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+        title: "Stuck.Magnet", episode_id: 5)
+      backend = StubBackend.new(build_config, [item], qbit_info)
+      backend.released = false
+      client = FakeDownloadClient.new(["virus.exe"], snapshot: meta_snapshot)
+
+      events = run_janitor(backend, client)
+
+      backend.deleted.should eq([item])
+      backend.searched.should be_empty
+      client.files_for_called?.should be_false
+      events.any?(&.message.includes?("not released yet")).should be_true
+    end
+
+    it "does not delete a metaDL torrent younger than the timeout and records first-seen" do
+      dir = File.tempname("arr_janitor_janitor_meta")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Fresh.Magnet", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        client = FakeDownloadClient.new(["virus.exe"],
+          snapshot: meta_snapshot(added_on: Time.utc - 1.minute))
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        backend.searched.should be_empty
+        client.files_for_called?.should be_false
+        store.first_seen_metadata(backend.name, "HASH").should_not be_nil
+        store.processed?(backend.name, "HASH").should be_false
+        events.any? { |event|
+          event.severity.debug? && event.message.includes?("downloading metadata")
+        }.should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "marks first-seen and does not delete a metaDL torrent with no added_on and no prior store row" do
+      dir = File.tempname("arr_janitor_janitor_meta")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "No.AddedOn", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        client = FakeDownloadClient.new(["virus.exe"],
+          snapshot: meta_snapshot(added_on: nil))
+
+        store.first_seen_metadata(backend.name, "HASH").should be_nil
+        run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        client.files_for_called?.should be_false
+        store.first_seen_metadata(backend.name, "HASH").should_not be_nil
+        store.processed?(backend.name, "HASH").should be_false
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "deletes a metaDL torrent with no added_on once first-seen is older than the timeout" do
+      dir = File.tempname("arr_janitor_janitor_meta")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Aged.Magnet", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        backend.released = true
+        store.mark_metadata(backend.name, "HASH", Time.utc - 16.minutes)
+        client = FakeDownloadClient.new(["virus.exe"],
+          snapshot: meta_snapshot(added_on: nil))
+
+        events = run_janitor(backend, client, store)
+
+        backend.deleted.should eq([item])
+        backend.searched.should eq([item])
+        client.files_for_called?.should be_false
+        recorded_action(path, backend.name, "HASH").should eq("removed_blocklisted_metadata")
+        events.any? { |event|
+          event.severity.warn? && event.message.includes?("stuck downloading metadata")
+        }.should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "does not act on metadata when the cleanup rule is disabled" do
+      dir = File.tempname("arr_janitor_janitor_meta")
+      Dir.mkdir_p(dir)
+      path = File.join(dir, "test.db")
+      store = ArrJanitor::Store.open(path)
+      begin
+        cleanup = ArrJanitor::Config::Cleanup.new(
+          metadata_downloading: ArrJanitor::Config::CleanupRule.new(enabled: false))
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Disabled.Meta", episode_id: 5)
+        backend = StubBackend.new(build_config(cleanup: cleanup), [item], qbit_info)
+        backend.released = true
+        client = FakeDownloadClient.new(["virus.exe"], snapshot: meta_snapshot)
+
+        events = run_janitor(backend, client, store)
+
+        # Falls through to the extension matcher; the bad file still triggers
+        # the existing delete path, not the metadata action.
+        backend.deleted.should eq([item])
+        client.files_for_called?.should be_true
+        store.first_seen_metadata(backend.name, "HASH").should be_nil
+        recorded_action(path, backend.name, "HASH").should eq("removed_blocklisted")
+        events.any?(&.message.includes?("stuck downloading metadata")).should be_false
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "logs a dry-run would-delete for a timed-out metaDL torrent without mutating" do
+      dir = File.tempname("arr_janitor_janitor_meta")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Stuck.Magnet", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        backend.released = true
+        client = FakeDownloadClient.new(["virus.exe"], snapshot: meta_snapshot)
+
+        events = run_janitor(backend, client, store, dry_run: true)
+
+        backend.deleted.should be_empty
+        backend.searched.should be_empty
+        client.files_for_called?.should be_false
+        store.processed?(backend.name, "HASH").should be_false
+        store.first_seen_metadata(backend.name, "HASH").should be_nil
+        events.any? { |event|
+          event.message.includes?("[DRY RUN] would delete + blocklist") &&
+            event.message.includes?("stuck downloading metadata")
+        }.should be_true
+        events.any?(&.message.includes?("[DRY RUN] would re-trigger search")).should be_true
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "skips (with a warning) when info_for raises a generic client error" do
+      broken = queue_item(id: 1, download_id: "BROKEN", download_client: "qbit",
+        title: "InspectFail", episode_id: 5)
+      good = queue_item(id: 2, download_id: "GOOD", download_client: "qbit",
+        title: "Fine", episode_id: 6)
+      backend = StubBackend.new(build_config, [broken, good], qbit_info)
+      backend.released = true
+      client = FakeDownloadClient.new(
+        ["virus.exe"],
+        info_error: ArrJanitor::DownloadClient::Error.new("qBittorrent API error: HTTP 500"),
+        failing_hash: "BROKEN")
+
+      events = run_janitor(backend, client)
+
+      backend.deleted.should eq([good])
+      backend.searched.should eq([good])
+      events.any? { |event|
+        event.severity.warn? && event.message.includes?("InspectFail") &&
+          event.message.includes?("could not inspect torrent")
+      }.should be_true
+      events.any?(&.severity.error?).should be_false
+    end
+
+    it "clears a leftover metadata clock when the torrent leaves metaDL" do
+      dir = File.tempname("arr_janitor_janitor_meta")
+      Dir.mkdir_p(dir)
+      store = ArrJanitor::Store.open(File.join(dir, "test.db"))
+      begin
+        item = queue_item(id: 1, download_id: "HASH", download_client: "qbit",
+          title: "Left.MetaDL", episode_id: 5)
+        backend = StubBackend.new(build_config, [item], qbit_info)
+        store.mark_metadata(backend.name, "HASH", Time.utc - 5.minutes)
+        client = FakeDownloadClient.new(["show.mkv"])
+
+        run_janitor(backend, client, store)
+
+        backend.deleted.should be_empty
+        client.files_for_called?.should be_true
+        store.first_seen_metadata(backend.name, "HASH").should be_nil
+      ensure
+        store.close
+        FileUtils.rm_rf(dir)
+      end
+    end
+  end
 end
 
 # Raises on the "BAD" hash and returns a bad file for anything else, exercising
@@ -392,6 +659,10 @@ end
 # Raises a specific `DownloadClient::Error` for one *failing_hash* and returns a
 # bad file for anything else, exercising the janitor's download-client error
 # handling while proving the scan continues past the failing item.
+#
+# `TorrentNotFound` is raised from `info_for` (the first lookup after the
+# client is resolved). Generic errors are raised from `files_for` so the
+# existing "could not list files" path stays covered once `info_for` succeeds.
 private class DownloadClientErrorClient < ArrJanitor::DownloadClient
   def initialize(@failing_hash : String, @error : ArrJanitor::DownloadClient::Error)
   end
@@ -402,6 +673,9 @@ private class DownloadClientErrorClient < ArrJanitor::DownloadClient
   end
 
   def info_for(hash : String) : ArrJanitor::DownloadClient::TorrentSnapshot
+    if hash == @failing_hash && @error.is_a?(ArrJanitor::DownloadClient::TorrentNotFound)
+      raise @error
+    end
     ArrJanitor::DownloadClient::TorrentSnapshot.new(
       hash: hash, state: "downloading", num_seeds: 1)
   end

@@ -11,6 +11,11 @@ private class FakeDownloadClient < ArrJanitor::DownloadClient
     end
     @files
   end
+
+  def info_for(hash : String) : ArrJanitor::DownloadClient::TorrentSnapshot
+    ArrJanitor::DownloadClient::TorrentSnapshot.new(
+      hash: hash, state: "downloading", num_seeds: 1)
+  end
 end
 
 # A `Backend` with canned queue/client-info/release status that records the
@@ -377,6 +382,11 @@ private class FailingThenBadClient < ArrJanitor::DownloadClient
     raise "kaboom" if hash == "BAD"
     ["virus.exe"]
   end
+
+  def info_for(hash : String) : ArrJanitor::DownloadClient::TorrentSnapshot
+    ArrJanitor::DownloadClient::TorrentSnapshot.new(
+      hash: hash, state: "downloading", num_seeds: 1)
+  end
 end
 
 # Raises a specific `DownloadClient::Error` for one *failing_hash* and returns a
@@ -389,5 +399,10 @@ private class DownloadClientErrorClient < ArrJanitor::DownloadClient
   def files_for(hash : String) : Array(String)
     raise @error if hash == @failing_hash
     ["virus.exe"]
+  end
+
+  def info_for(hash : String) : ArrJanitor::DownloadClient::TorrentSnapshot
+    ArrJanitor::DownloadClient::TorrentSnapshot.new(
+      hash: hash, state: "downloading", num_seeds: 1)
   end
 end

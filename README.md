@@ -4,9 +4,10 @@ ArrJanitor is a long-running Crystal service that watches the download queues of
 your **Sonarr** and **Radarr** instances and cleans up junk downloads
 automatically.
 
-For every queued/downloading/downloaded item it inspects the files inside the
-torrent (via the download client) and, when it finds a **bad file extension**
-(e.g. a `.scr`/`.exe`/`.lnk` decoy), it tells the *arr to:
+For every queued/downloading/downloaded item it inspects the torrent (via the
+download client). When it finds a **bad file extension** (e.g. a
+`.scr`/`.exe`/`.lnk` decoy), a torrent stuck **Downloading metadata**, or a
+download **stalled with zero seeds**, it tells the *arr to:
 
 1. **delete + blocklist** the download (remove it from the client and blocklist
    the release so it isn't grabbed again), and
@@ -25,10 +26,16 @@ a scan:
 ```
 queue → for each item:
   resolve its download client (host/type from the *arr, creds from config)
+  fetch torrent snapshot (state, seeds, added_on)
+    → stuck in metaDL longer than cleanup.metadata_downloading.timeout:
+         delete_and_blocklist → (if released) search → record
+    → still fetching metadata (under timeout): wait
   list the torrent's files by hash
   match each file against extensions_filter
-    → any match:  delete_and_blocklist  → (if released) search  → record to SQLite
-    → no match:   leave it alone
+    → any match:  delete_and_blocklist  → (if released) search  → record
+  if downloading with 0 seeds longer than cleanup.stalled.timeout:
+         delete_and_blocklist → (if released) search → record
+    → otherwise: leave it alone
 ```
 
 Workers never write logs directly; they emit log events onto a channel that the
@@ -63,6 +70,13 @@ backends:
         username: admin          # api_key XOR (username + password)
         password: password
         # api_key: "..."         # alternative to username/password
+    # cleanup:                       # optional; omit for defaults (both on)
+    #   metadata_downloading:
+    #     enabled: true              # default true
+    #     timeout: 15m               # default 15m, <int>[m|h|d]
+    #   stalled:
+    #     enabled: true              # default true
+    #     timeout: 60m               # default 60m, <int>[m|h|d]
 ```
 
 ### Schema
@@ -87,6 +101,7 @@ Each entry in `backends`:
 | `interval`          | no       | `20m`   | Poll interval, `<int>[m\|h\|d]`.                          |
 | `extensions_filter` | yes      | —       | Non-empty list of bad-extension rules (see below).        |
 | `download_clients`  | yes      | —       | At least one; supplies credentials (see below).           |
+| `cleanup`           | no       | both on | Optional nested rules; omit for defaults (see [Cleanup](#cleanup)). |
 
 Each entry in `download_clients`:
 
@@ -104,8 +119,34 @@ requires `username` + `password`.
 
 The config is validated at startup and the process exits non-zero with a list of
 all problems if anything is wrong (missing required fields, unknown `type`, a
-malformed `interval`, an empty `extensions_filter`, no download clients, or a
-download client missing credentials).
+malformed `interval` or `cleanup.*.timeout`, an empty `extensions_filter`, no
+download clients, or a download client missing credentials).
+
+### Cleanup
+
+Optional per-backend rules. Omitting `cleanup` entirely applies the defaults
+(both kinds on). `enabled: false` turns that kind off. A partial block is
+valid — e.g. disabling only `stalled` leaves metadata cleanup on at 15m. The
+JSON sample includes an explicit `cleanup` object with those defaults so JSON
+users see the keys; omitting it is equivalent.
+
+| Key                                      | Required | Default | Notes                                                          |
+| ---------------------------------------- | -------- | ------- | -------------------------------------------------------------- |
+| `cleanup.metadata_downloading.enabled`   | no       | `true`  | Act on torrents stuck in qBittorrent `metaDL`.                 |
+| `cleanup.metadata_downloading.timeout`   | no       | `15m`   | `<int>[m\|h\|d]`. How long `metaDL` may last.                  |
+| `cleanup.stalled.enabled`                | no       | `true`  | Act on downloading torrents with zero connected seeds.         |
+| `cleanup.stalled.timeout`                | no       | `60m`   | `<int>[m\|h\|d]`. How long the 0-seed condition may last.      |
+
+Detection:
+
+- **`metadata_downloading`**: qBittorrent state `metaDL`. The clock is the
+  torrent's `added_on` (falls back to first-seen in SQLite). It can fire on
+  the first scan / a one-shot run if the magnet is already older than the
+  timeout.
+- **`stalled`**: `num_seeds == 0` and state is `downloading` / `stalledDL` /
+  `forcedDL`. Not queued, stopped, or seeding. The clock is first-seen across
+  scans. The default 20m poll interval means a 60m stall is observed over
+  multiple scans.
 
 ### Extension matching
 
@@ -316,8 +357,8 @@ two tables:
 - **`processed_downloads`** — an audit log of every download ArrJanitor has acted
   on (backend, download id, title, action, matched extensions, timestamp). Rows
   older than `retention` are swept away.
-- **`download_states`** — per-download bookkeeping (when a download was first
-  seen stalled); groundwork for stalled-download handling.
+- **`download_states`** — per-download first-seen clocks for **metadata**
+  (`first_seen_metadata`) and **stalled** (`first_seen_stalled`) cleanup.
 
 ## Logging
 

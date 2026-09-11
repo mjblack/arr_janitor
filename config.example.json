@@ -16,7 +16,11 @@
           "username": "admin",
           "password": "password"
         }
-      ]
+      ],
+      "cleanup": {
+        "metadata_downloading": { "enabled": true, "timeout": "15m" },
+        "stalled": { "enabled": true, "timeout": "60m" }
+      }
     }
   ]
 }

@@ -19,3 +19,10 @@ backends:
         username: admin          # api_key XOR (username + password)
         password: password
         # api_key: "..."         # alternative to username/password
+    # cleanup:                       # optional; omit for defaults (both on)
+    #   metadata_downloading:
+    #     enabled: true              # default true
+    #     timeout: 15m               # default 15m, <int>[m|h|d]
+    #   stalled:
+    #     enabled: true              # default true
+    #     timeout: 60m               # default 60m, <int>[m|h|d]

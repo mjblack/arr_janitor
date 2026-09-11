@@ -27,10 +27,15 @@ Each unit lands on its own local branch, is reviewed, and merged into `master`.
   **immediately when `due?`** (missed/first run), then `schedule_next`. Workers send
   `LogEvent`s down a `Channel` drained by the **main fiber**. Build/run with **`-Dpreview_mt`**.
   Graceful shutdown (SIGINT/SIGTERM); `arr_janitor.cr` parses the config path and runs. Depends on #4.
-- [ ] **6. Tests + Docs + CI** — unit specs (config validation, interval parse, ext matching,
-  janitor logic with stubbed backends/clients); README + sample configs; CI/release workflow
-  (deferred until a GitHub repo exists — needs a token for the private `qbittorrent.cr` dep).
+- [x] **6. Tests + Docs + CI** — unit specs (config validation, interval parse, ext matching,
+  janitor logic with stubbed backends/clients); README + sample configs; GitHub Actions
+  CI/release. (CI and core docs already exist on the public GitHub repo; the old
+  token/private-dep blocker is obsolete.)
+- [x] **7. Metadata + stalled cleanup** — per-backend `cleanup` config (defaults on;
+  15m `metaDL` / 60m zero-seed); `info_for` / `TorrentSnapshot`; independent first-seen
+  clocks in `download_states`; janitor pipeline snapshot → metadata → files/ext → stalled.
+  (#25, #27, #31, #32, #26, #33)
 
 ## Sequencing
-#1 first → #2 + #3 in parallel → #4 → #5. Tests/docs alongside. Radarr backend is a
-follow-up once the Sonarr path is proven.
+#1 first → #2 + #3 in parallel → #4 → #5. Tests/docs alongside. Radarr backend and
+metadata/stalled cleanup have both landed.

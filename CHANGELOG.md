@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Metadata-downloading and stalled cleanup** — per-backend `cleanup` config
+  (defaults: both enabled; `metadata_downloading.timeout` 15m,
+  `stalled.timeout` 60m) that delete+blocklist torrents stuck in qBittorrent
+  `metaDL` or downloading with zero seeds, then re-search if released.
+  (#32, #26, #25, #27, #31)
+
 ## [0.2.6] - 2026-07-21
 
 ### Documentation
